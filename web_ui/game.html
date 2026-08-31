@@ -4,43 +4,91 @@
   <meta charset="utf-8" />
   <title>Fanqi 对战 · 指导</title>
   <style>
-    body{font-family:system-ui,Segoe UI,Arial;margin:16px}
-    .tabs{display:flex;gap:8px;margin:10px 0}
-    .tab{padding:6px 18px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:14px}
-    .tab.active{background:#08f;color:#fff;border-color:#08f}
-    .board{display:grid;grid-template-columns:repeat(8,56px);gap:6px;margin-top:12px}
-    #cBoard{grid-template-columns:repeat(4,56px)}
-    .cell{width:56px;height:56px;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;font-weight:700;user-select:none;font-size:15px;position:relative}
+    :root{
+      --bg:#f3eee5; --card:#fffdf9; --line:#e7ddcc; --ink:#3a372f; --muted:#948b7b;
+      --accent:#2f6b5f; --accent-dark:#255850; --gold:#e2a93b; --red:#c8433a;
+      --red-bg:#f9e5e1; --red-line:#ecc6be; --black:#33415a; --black-bg:#e9edf5;
+      --black-line:#c9d1e1; --shadow:0 12px 34px rgba(76,62,40,.10);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+      background:radial-gradient(900px 480px at 12% -8%, #fffaf0, transparent), var(--bg);
+      color:var(--ink);-webkit-font-smoothing:antialiased}
+    .app{max-width:1170px;margin:0 auto;padding:28px 26px 70px}
+    header.top{display:flex;align-items:center;gap:15px;margin-bottom:20px}
+    .logo{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,var(--accent),#3d8c7c);
+      display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:21px;box-shadow:var(--shadow)}
+    .brand h1{font-size:22px;margin:0;letter-spacing:.3px}
+    .brand .sub{font-size:12.5px;color:var(--muted);margin-top:3px}
+    .top-links{margin-left:auto}
+    .top-links a{color:var(--accent);text-decoration:none;border:1px solid var(--line);padding:7px 14px;border-radius:22px;background:var(--card);font-size:13px}
+    .top-links a:hover{background:#f4efe6;border-color:var(--accent)}
+    .tabs{display:flex;gap:6px;background:rgba(255,253,249,.85);border:1px solid var(--line);padding:5px;border-radius:14px;width:max-content;margin-bottom:18px;box-shadow:var(--shadow)}
+    .tab{border:none;background:transparent;padding:9px 22px;border-radius:10px;cursor:pointer;font-size:14.5px;font-weight:600;color:var(--muted);transition:.15s}
+    .tab:hover{color:var(--ink)}
+    .tab.active{background:var(--accent);color:#fff;box-shadow:0 4px 14px rgba(47,107,95,.35)}
+    #playPane,#coachPane{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:var(--shadow)}
+    button,select,input{font-family:inherit;font-size:13.5px}
+    button{border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 14px;border-radius:10px;cursor:pointer;transition:.16s;line-height:1.2}
+    button:hover{border-color:var(--accent);color:var(--accent);background:#f2f8f5}
+    button:disabled{opacity:.45;cursor:not-allowed;background:#eee}
+    select{border:1px solid var(--line);padding:7px 10px;border-radius:9px;background:#fff;color:var(--ink);cursor:pointer}
+    input[type=text],input[type=number]{border:1px solid var(--line);padding:7px 9px;border-radius:9px;background:#fff;color:var(--ink)}
+    .controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    .controls label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);background:#faf5ec;border:1px solid var(--line);padding:5px 12px;border-radius:20px;white-space:nowrap}
+    .controls label input,.controls label select{border:none;background:transparent;padding:0;color:var(--ink)}
+    .controls label input[type=number]{width:52px}
+    #newGame,#editSetupBtn,#startGameBtn,#analyzeBtn,#adviseBtn,#toCoachBtn,#randomBtn,#iStart,#importOk,#rmOk{background:var(--accent);color:#fff;border-color:var(--accent)}
+    #newGame:hover,#editSetupBtn:hover,#startGameBtn:hover,#analyzeBtn:hover,#adviseBtn:hover,#toCoachBtn:hover,#randomBtn:hover,#iStart:hover,#importOk:hover,#rmOk:hover{background:var(--accent-dark)}
+    .status{margin:16px 0 4px;font-weight:700;font-size:16.5px}
+    .board{display:grid;grid-template-columns:repeat(8,58px);gap:7px;margin-top:16px;justify-content:center;width:max-content}
+    #cBoard,#iBoard{grid-template-columns:repeat(4,58px)}
     #cBoard .cell{cursor:pointer}
-    .coord{position:absolute;top:1px;left:3px;font-size:9px;color:#999;font-weight:400}
-    .R{background:#ffecec;color:#900}
-    .B{background:#ecf0ff;color:#034}
-    .empty{background:#fafafa;border-color:#eee}
-    .hidden{background:#444;color:#888;border-color:#555}
+    .cell{width:58px;height:58px;border-radius:11px;display:flex;align-items:center;justify-content:center;position:relative;font-weight:800;font-size:17px;user-select:none;border:1.5px solid var(--line);background:#fdfbf7;color:var(--ink);transition:.12s}
+    .cell:hover{border-color:#c9b999;box-shadow:0 2px 6px rgba(76,62,40,.08)}
+    .coord{position:absolute;top:2px;right:4px;font-size:9px;color:rgba(58,55,47,.38);font-weight:600}
+    .R{background:var(--red-bg);color:var(--red);border-color:var(--red-line)}
+    .B{background:var(--black-bg);color:var(--black);border-color:var(--black-line)}
+    .empty{background:#fcfaf5;border-color:#eae0cc}
+    .hidden{background:linear-gradient(150deg,#6b6e83,#50546a);color:#cdd0df;border-color:#474a60;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}
+    .hidden .coord{color:rgba(255,255,255,.35)}
     .clickable{cursor:pointer}
-    .mine{cursor:pointer;box-shadow:0 0 0 2px #4a9}
-    .target{cursor:pointer;background:#ffe9a8 !important;border-color:#c90 !important}
-    .attack{cursor:pointer;background:#ffb3b3 !important;border-color:#c00 !important}
-    .sel{box-shadow:0 0 0 2px #08f}
-    .badcell{box-shadow:0 0 0 2px #f00}
-    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .status{margin:10px 0;font-weight:600;font-size:15px}
-    .advice{margin-top:10px;font-size:13px}
-    .adv-item{padding:6px 8px;margin:3px 0;border:1px solid #ddd;border-radius:6px;cursor:pointer;background:#fff;font-size:13px}
-    .adv-item:hover{border-color:#4a9;background:#eefaf3}
-    .adv-top{border-color:#c90;background:#fff7e0;font-weight:600}
-    .log{margin-top:12px;font-family:monospace;font-size:13px;background:#f7f7f7;padding:8px;border:1px solid #eee;max-height:260px;overflow:auto;white-space:pre-wrap}
-    .layout{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
-    .side{width:360px}
-    .panel{border:1px solid #ddd;border-radius:8px;padding:10px;margin-bottom:12px;background:#fafafa}
-    .hint{font-size:12px;color:#777;margin-top:4px}
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:10}
-    .modal-box{background:#fff;border-radius:8px;padding:14px;width:420px;max-width:92vw}
-    .modal-box textarea{width:100%;box-sizing:border-box;margin:8px 0;font-family:monospace;font-size:12px}
+    .mine{cursor:pointer;box-shadow:0 0 0 2.5px var(--gold)}
+    .target{cursor:pointer;background:#fdeecb !important;border-color:var(--gold) !important;box-shadow:0 0 0 2.5px var(--gold)}
+    .attack{cursor:pointer;background:#ffd8d1 !important;border-color:var(--red) !important;box-shadow:0 0 0 2.5px var(--red)}
+    .sel{box-shadow:0 0 0 3px var(--accent)}
+    .badcell{box-shadow:0 0 0 3px #e5484d;animation:shake .4s}
+    @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+    .advice{margin-top:12px}
+    .adv-item{padding:10px 12px;margin:6px 0;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:#fff;font-size:13.5px;transition:.15s}
+    .adv-item:hover{border-color:var(--gold);background:#fff8ea}
+    .adv-top{border-color:var(--gold) !important;background:#fff6df !important;font-weight:700}
+    .log{margin-top:16px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:#24262f;color:#d8dbe4;padding:12px 14px;border-radius:12px;max-height:280px;overflow:auto;white-space:pre-wrap;line-height:1.7}
+    .layout{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;margin-top:12px}
+    .side{width:376px;display:flex;flex-direction:column;gap:12px}
+    .panel{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fdfaf4}
+    .panel b{display:block;font-size:14px;margin-bottom:4px}
+    .panel button{margin-top:8px}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.55}
+    .modal{position:fixed;inset:0;background:rgba(42,33,20,.45);display:flex;align-items:center;justify-content:center;z-index:30;backdrop-filter:blur(3px)}
+    .modal-box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;width:430px;max-width:94vw;box-shadow:var(--shadow)}
+    .modal-box > b:first-child{font-size:15px;display:block;margin-bottom:2px}
+    .modal-box textarea{width:100%;box-sizing:border-box;margin:10px 0;font-family:ui-monospace,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fdfaf4;color:var(--ink)}
+    .modal-box > div:last-child{display:flex;gap:8px;margin-top:10px}
+    #pInfo,#cInfo{font-size:12.5px;color:var(--accent);background:#eef5f2;border:1px solid var(--line);padding:4px 12px;border-radius:16px;font-weight:600;white-space:nowrap}
+    .status .win{color:var(--accent)}
   </style>
 </head>
 <body>
-  <h2>Fanqi 对战 · 指导 <a href="index.html" style="font-size:14px">回放查看器 →</a></h2>
+<div class="app">
+  <header class="top">
+    <div class="logo">棋</div>
+    <div class="brand">
+      <h1>Fanqi 对战 · 指导</h1>
+      <div class="sub">翻棋(暗棋)人机对弈 · MCTS 强 AI</div>
+    </div>
+    <div class="top-links"><a href="index.html">回放查看器 →</a></div>
+  </header>
   <div class="tabs">
     <button id="tabPlay" class="tab active">⚔ 对战</button>
     <button id="tabCoach" class="tab">🎯 指导</button>
@@ -910,5 +958,6 @@
     document.getElementById('tabPlay').onclick = () => switchTab('play');
     document.getElementById('tabCoach').onclick = () => switchTab('coach');
   </script>
+</div>
 </body>
 </html>
