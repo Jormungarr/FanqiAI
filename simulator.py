@@ -131,6 +131,25 @@ def render_pretty(state: GameState, show_coords: bool = False, vertical: bool = 
     return '\n'.join(lines)
 
 
+def print_board_from_serialized(arr):
+    # print 4x8 board from serialized list
+    lines = []
+    for r in range(4):
+        row = arr[r*8:(r+1)*8]
+        parts = []
+        for c in row:
+            if c == '.':
+                parts.append(' .')
+            else:
+                col, ptype, rev = c.split(':')
+                if rev == '0':
+                    parts.append(' ■')
+                else:
+                    parts.append(f'{col}{ptype}')
+        lines.append(' '.join(parts))
+    print('\n'.join(lines))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--games', type=int, default=1)
@@ -157,7 +176,6 @@ if __name__ == '__main__':
                 os.system(clear_cmd)
                 print(f"{i:03d}", s.get('player'), s.get('action'), 'scores', s.get('scores'))
                 # render board
-                from game.fanqi.replay import deserialize_board
                 b = s.get('board')
                 # reuse render by converting to temporary GameState? simple render from string
                 print_board_from_serialized(b)
@@ -182,20 +200,3 @@ if __name__ == '__main__':
     print('结果汇总:', results)
 
 
-def print_board_from_serialized(arr):
-    # print 4x8 board from serialized list
-    lines = []
-    for r in range(4):
-        row = arr[r*8:(r+1)*8]
-        parts = []
-        for c in row:
-            if c == '.':
-                parts.append(' .')
-            else:
-                col, ptype, rev = c.split(':')
-                if rev=='0':
-                    parts.append(' ■')
-                else:
-                    parts.append(f'{col}{ptype}')
-        lines.append(' '.join(parts))
-    print('\n'.join(lines))

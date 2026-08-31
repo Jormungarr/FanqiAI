@@ -221,6 +221,15 @@ class GameState:
     def apply_action(self, action: Tuple) -> Tuple[bool, str]:
         # returns (game_over, reason)
         act = action[0]
+        # 防御:索引越界/自吃一律拒绝(不抛异常,保持 API 稳定)
+        if act in ('move', 'capture', 'cannon'):
+            if not (0 <= action[1] < 32 and 0 <= action[2] < 32):
+                return False, f'{act} out of range'
+            if action[1] == action[2]:
+                return False, 'invalid self target'
+        elif act == 'flip':
+            if not (0 <= action[1] < 32):
+                return False, 'flip out of range'
         if act == 'flip':
             _, pos = action
             p = self.board[pos]
@@ -279,10 +288,24 @@ class GameState:
             tgt = self.board[dst]
             if mover is None or mover.ptype != 'C':
                 return False, 'invalid cannon'
-            # ensure there is exactly one intervening piece (already enforced in move generation normally)
-            # Cannon must flip target if unrevealed
             if tgt is None:
                 return False, 'no target'
+            # 防御:校验同一直线且恰好隔一个棋子(炮架),防止绕过 move generation 直接调用
+            sr, sc = self.rc(src)
+            dr, dc = self.rc(dst)
+            if sr != dr and sc != dc:
+                return False, 'cannon not in line'
+            step_r = 0 if dr == sr else (1 if dr > sr else -1)
+            step_c = 0 if dc == sc else (1 if dc > sc else -1)
+            cnt = 0
+            r, c = sr + step_r, sc + step_c
+            while (r, c) != (dr, dc):
+                if self.board[self.idx(r, c)] is not None:
+                    cnt += 1
+                r += step_r; c += step_c
+            if cnt != 1:
+                return False, 'cannon needs exactly one intervening piece'
+            # Cannon must flip target if unrevealed
             # reveal first (blind shot must show the piece before removal)
             was_revealed = tgt.revealed
             if not tgt.revealed:

@@ -20,7 +20,7 @@ def deserialize_board(arr):
             board.append(None)
         else:
             color, ptype, rev = cell.split(':')
-            from game.fanqi.engine import Piece
+            from engine import Piece
             pc = Piece(ptype, color)
             pc.revealed = bool(int(rev))
             board.append(pc)

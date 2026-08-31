@@ -2,10 +2,11 @@ import json
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 files = [
-    Path('d:/workspace/game/fanqi/replay_samples/test_replay.json'),
-    Path('d:/workspace/game/fanqi/replay_samples/generated_replay.json'),
-    Path('d:/workspace/game/fanqi/replay_samples/generated_kifu.json'),
+    ROOT / 'replay_samples' / 'test_replay.json',
+    ROOT / 'replay_samples' / 'generated_replay.json',
+    ROOT / 'replay_samples' / 'generated_kifu.json',
 ]
 
 issues = []

@@ -14,7 +14,7 @@ import argparse
 import json
 import os
 import random
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
 try:
@@ -167,9 +167,9 @@ class Session:
             self.end_reason = reason
             return True, None
         if reason not in ('move', 'flip', 'capture', 'cannon'):
+            # 非法动作在 _apply_step 中不会追加 removed(追加条件要求 reason 为
+            # capture/cannon),因此只回滚 history,不能弹 removed(会误删上一步的已吃记录)
             self.history.pop()
-            if self.removed:
-                self.removed.pop()
             return False, reason
         self.turn = self.ai_color
         self._ai_step()
@@ -429,7 +429,8 @@ def main():
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--host', default='127.0.0.1')
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    # 单线程:全局 session 无锁,串行处理天然线程安全(本地单用户足够)
+    server = HTTPServer((args.host, args.port), Handler)
     print(f'Fanqi 对战·指导服务器已启动: http://{args.host}:{args.port}/web_ui/game.html')
     try:
         server.serve_forever()

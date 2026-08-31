@@ -27,9 +27,9 @@ class PreferHighValueAgent(RandomAgent):
         # prefer capture/cannon actions
         capture_acts = [a for a in acts if a[0] in ('capture','cannon')]
         if capture_acts:
-            return random.choice(capture_acts)
+            return self.rng.choice(capture_acts)
         # prefer flip that is adjacent to known high-value? simple: random flip
         flip_acts = [a for a in acts if a[0]=='flip']
         if flip_acts:
-            return random.choice(flip_acts)
-        return random.choice(acts)
+            return self.rng.choice(flip_acts)
+        return self.rng.choice(acts)
