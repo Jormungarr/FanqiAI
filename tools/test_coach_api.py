@@ -57,7 +57,7 @@ assert r['eval_win_rate'] is not None
 print('   黑方局面胜率 %.1f%% | 候选 %d 个 | 推荐: %s' % (
     r['eval_win_rate'] * 100, len(r['moves']), r['moves'][0]['text']))
 
-# 用例C: 'H' 暗棋随机分配(5个H + 其余空) + 种子复现
+# 用例C: 'H' 暗棋随机分配(5个H + 其余空) + 种子复现 + hidden_map
 board = ['.'] * 32
 board[0] = 'R:J'
 board[2] = 'H'
@@ -67,6 +67,33 @@ r1 = test('H随机分配(种子1)', {'board': board, 'turn': 'R', 'scores': {'R'
 r2 = test('H随机分配(种子1复现)', {'board': board, 'turn': 'R', 'scores': {'R': 60, 'B': 60}, 'seed': 1}, True)
 assert r1['moves'][0]['text'] == r2['moves'][0]['text'], '同种子应可复现'
 print('   推荐(种子复现一致):', r1['moves'][0]['text'])
+# hidden_map:每个 H 格都有分配内容,且不与明棋/已吃重复
+hm = r1['hidden_map']
+assert set(hm.keys()) == {'2', '3', '4'}, 'hidden_map 应覆盖全部 H 格,实际: %s' % sorted(hm.keys())
+assert all(v not in ('R:J',) for v in hm.values()), '暗棋分配不应包含棋盘上的明棋'
+print('   hidden_map:', hm)
+
+# 用例C2: 配额只约束明棋——5明兵+2暗兵(内容指定,引擎兼容)不报错;
+# 但 6 个明兵必须报错(录入错误)
+board = ['.'] * 32
+for i in range(5):
+    board[i] = 'R:P'
+board[5] = 'R:P?'   # 暗兵(不参与配额)
+board[6] = 'H'
+r = test('5明兵+2暗兵不报错', {'board': board, 'turn': 'R'}, True)
+print('   候选', len(r['moves']), '个,隐藏分配:', r['hidden_map'])
+board[5] = 'R:P'    # 第 6 个明兵 -> 超配
+r = test('6明兵必报错', {'board': board, 'turn': 'R'}, False, expect_err='cell 5')
+
+# 用例C3: 暗棋分配池=标准−明棋−已吃:5明兵后,暗棋里不可能再有兵
+board = ['.'] * 32
+for i in range(5):
+    board[i] = 'R:P'
+for i in range(5, 15):
+    board[i] = 'H'
+r = test('5明兵+10暗棋:暗棋无兵', {'board': board, 'turn': 'R', 'seed': 7}, True)
+assert all(v != 'R:P' for v in r['hidden_map'].values()), '5个红兵已全部翻开,暗棋里不应再有红兵: %s' % r['hidden_map']
+print('   暗棋分配无红兵 OK:', sorted(set(r['hidden_map'].values())))
 
 # 用例D: 无合法动作(全是己方明棋包围?直接空棋盘)
 r = test('空棋盘(无合法动作)', {'board': ['.'] * 32, 'turn': 'R'}, True)

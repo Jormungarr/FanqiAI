@@ -128,14 +128,18 @@ class GameState:
                 color, ptype = s[0], s[2]
                 if color not in ('R', 'B') or ptype not in TYPE_ORDER:
                     raise ValueError(f'bad cell {i}: {s}')
-                if used[color][ptype] <= 0:
-                    raise ValueError(
-                        f'too many {color}{ptype} (cell {i}): '
-                        f'{color} 的 {TYPE_CN[ptype]}标准最多 {PIECE_COUNT[ptype]} 个,'
-                        '已全部在棋盘上,请检查该格是否误录,或确认「已吃」登记未与棋盘冲突')
-                used[color][ptype] -= 1
+                revealed = not s.endswith('?')
+                if revealed:
+                    # 配额校验只针对明棋:暗棋(未翻开)内容对所有人未知,
+                    # 局面基于公开信息,不参与配额
+                    if used[color][ptype] <= 0:
+                        raise ValueError(
+                            f'too many {color}{ptype} (cell {i}): '
+                            f'{color} 的 {TYPE_CN[ptype]}标准最多 {PIECE_COUNT[ptype]} 个,'
+                            '已全部翻开在棋盘上,请检查该格是否误录,或确认「已吃」登记未与棋盘冲突')
+                    used[color][ptype] -= 1
                 p = Piece(ptype, color)
-                p.revealed = not s.endswith('?')
+                p.revealed = revealed
                 gs.board[i] = p
             else:
                 raise ValueError(f'bad cell {i}: {s}')

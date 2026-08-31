@@ -300,7 +300,7 @@ class Handler(BaseHTTPRequestHandler):
                                  'total': 0, 'moves': [],
                                  'note': '该局面无合法动作(已终局)'})
                 return
-            info = evaluate_moves(game, turn, time_budget=time_budget)
+            info = evaluate_moves(game, turn, time_budget=time_budget, seed=seed)
             moves = [
                 {'action': m['action'],
                  'text': action_text(m['action'], turn),
@@ -308,10 +308,18 @@ class Handler(BaseHTTPRequestHandler):
                  'visits': m['visits']}
                 for m in info['moves']
             ]
+            # 暗棋分配:指导模式基于公开信息,AI 从「标准配置−明棋−已吃」
+            # 的剩余池随机分配暗棋内容,返回给前端用于推演(仅内部使用)
+            hidden_map = {}
+            for i, s in enumerate(board):
+                if s == 'H':
+                    p = game.board[i]
+                    hidden_map[str(i)] = f'{p.color}:{p.ptype}'
             self._send_json({'ok': True, 'turn': turn,
                              'eval_win_rate': round(info['turn_win_rate'], 4)
                              if info['turn_win_rate'] is not None else None,
-                             'total': info['total'], 'moves': moves})
+                             'total': info['total'], 'moves': moves,
+                             'hidden_map': hidden_map})
         else:
             self._send_json({'error': 'not found'}, 404)
 

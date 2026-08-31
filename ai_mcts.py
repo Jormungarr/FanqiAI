@@ -54,13 +54,17 @@ def _uct(child: _Node, parent_visits: int, c: float = 1.5) -> float:
     return exploit - explore
 
 
-def _rollout(state: GameState, turn: str, max_steps: int = 80, policy: str = 'prefer'):
+def _rollout(state: GameState, turn: str, max_steps: int = 80, policy: str = 'prefer',
+             rng=None):
     """模拟到终局;超出步数时按剩余分数差启发式截断。
 
     policy:
       'random' - 纯随机动作(标准 MCTS)
       'prefer' - 吃子/炮击优先(70%),否则优先翻棋,最后才移动(领域知识 rollout)
+    rng: 随机源(传入 Random 实例可复现,None 用模块级 random)
     """
+    if rng is None:
+        rng = random
     steps = 0
     while steps < max_steps:
         w = state.winner()
@@ -71,18 +75,18 @@ def _rollout(state: GameState, turn: str, max_steps: int = 80, policy: str = 'pr
             return state.winner()
         if policy == 'prefer':
             eat = [a for a in acts if a[0] in ('capture', 'cannon')]
-            if eat and random.random() < 0.7:
-                a = random.choice(eat)
+            if eat and rng.random() < 0.7:
+                a = rng.choice(eat)
             else:
                 flips = [a for a in acts if a[0] == 'flip']
-                if flips and (not eat or random.random() < 0.8):
-                    a = random.choice(flips)
+                if flips and (not eat or rng.random() < 0.8):
+                    a = rng.choice(flips)
                 elif eat:
-                    a = random.choice(eat)
+                    a = rng.choice(eat)
                 else:
-                    a = random.choice(acts)
+                    a = rng.choice(acts)
         else:
-            a = random.choice(acts)
+            a = rng.choice(acts)
         state.apply_action(a)
         turn = _other(turn)
         steps += 1
@@ -95,8 +99,12 @@ def _rollout(state: GameState, turn: str, max_steps: int = 80, policy: str = 'pr
 
 def search(state: GameState, color: str, time_budget: float = 2.0,
            max_iterations: int = 3000, rollout_steps: int = 80,
-           rollout_policy: str = 'prefer'):
-    """UCT 树搜索,返回根节点(所有子节点即各候选动作的统计)"""
+           rollout_policy: str = 'prefer', seed=None):
+    """UCT 树搜索,返回根节点(所有子节点即各候选动作的统计)。
+
+    seed: 播种 rollout 随机源,同 seed 可复现搜索结果(默认 None 不固定)。
+    """
+    rng = random.Random(seed) if seed is not None else None
     root = _Node(turn=color)
     root.untried = state.get_legal_actions(color)
     if not root.untried:
@@ -122,7 +130,7 @@ def search(state: GameState, color: str, time_budget: float = 2.0,
             node.children.append(child)
             node = child
         # 3) rollout:模拟到终局
-        winner = _rollout(s, turn, rollout_steps, rollout_policy)
+        winner = _rollout(s, turn, rollout_steps, rollout_policy, rng)
         # 4) backprop:沿途更新统计
         while node is not None:
             node.visits += 1
@@ -137,12 +145,14 @@ def search(state: GameState, color: str, time_budget: float = 2.0,
 
 def evaluate_moves(state: GameState, color: str, time_budget: float = 2.0,
                    max_iterations: int = 3000, rollout_steps: int = 80,
-                   rollout_policy: str = 'prefer'):
+                   rollout_policy: str = 'prefer', seed=None):
     """搜索并对每个候选动作给出胜率评估,按胜率降序。
 
     返回 {'moves': [{'action', 'win_rate', 'visits'}...], 'total': 根节点总访问数}
+    seed: 透传给 search,同 seed 可复现评估。
     """
-    root = search(state, color, time_budget, max_iterations, rollout_steps, rollout_policy)
+    root = search(state, color, time_budget, max_iterations, rollout_steps,
+                  rollout_policy, seed)
     moves = []
     for ch in root.children:
         if ch.visits > 0:

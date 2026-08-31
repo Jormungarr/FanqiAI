@@ -12,7 +12,6 @@
     .B{background:#ecf0ff;color:#034}
     .empty{background:#fafafa;border-color:#eee}
     .hidden{background:#444;color:#888;border-color:#555}
-    .xray .hidden{background:#3a3a3a;color:#9cf;border-color:#666;font-size:13px}
     .sel{box-shadow:0 0 0 2px #08f}
     .badcell{box-shadow:0 0 0 2px #f00}
     .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -37,7 +36,6 @@
     <button id="clearBtn">清空</button>
     <button id="importBtn">📋 导入</button>
     <button id="exportBtn">📤 导出</button>
-    <label>透视暗棋 <input id="xray" type="checkbox"></label>
     <label>轮到 <select id="turnSel">
       <option value="R">红方</option>
       <option value="B">黑方</option>
@@ -49,7 +47,7 @@
     <button id="analyzeBtn">🎯 AI 分析</button>
     <span id="info"></span>
   </div>
-  <div class="hint" style="margin-top:6px">真实对局录入:先「填满暗棋」,再把空格点掉、明棋选中设类型;或「导入」文本(格式 <b>类型@行,列</b>,如 R:J@0,0 / H@2,3,一行一子)。暗棋内容未知,AI 从剩余棋子随机分配。</div>
+  <div class="hint" style="margin-top:6px">真实对局录入:先「填满暗棋」,再把空格点掉、明棋选中设类型;或「导入」文本(格式 <b>类型@行,列</b>,如 R:J@0,0 / H@2,3,一行一子)。<b>暗棋内容对所有人未知(含 AI)</b>:AI 分析时从「标准配置 − 明棋 − 已吃」的剩余棋子中随机分配——翻开 5 个兵后,暗棋里不可能再有兵。</div>
   <div class="layout">
     <div>
       <div id="status" class="status">点击格子摆子,或点「随机开局」生成完整对局</div>
@@ -84,6 +82,7 @@
     let analysis = null;   // {eval_win_rate, total, moves}
     let history = [];      // 推演栈 [{cells, turn, scores}]
     let badCell = -1;      // 分析报错时高亮的冲突格子
+    let hiddenMap = null;  // AI 分析的暗棋分配 {idx: 'R:P'}(仅用于推演,不展示)
     let busy = false;
 
     const PIECE_CN = {
@@ -93,8 +92,8 @@
     const COLOR_CN = {R:'红方', B:'黑方'};
     // 棋子分值(吃子扣被吃方,误伤扣自己)
     const VALUE = {J:30, S:10, X:5, R:5, N:5, C:5, P:2};
-    // 编辑器类型下拉: [值, 显示名]
-    const TYPE_OPTS = [['.', '空'], ['H', '暗棋·随机'],
+    // 编辑器类型下拉: [值, 显示名]——暗棋只有 H(内容未知),不预设内容
+    const TYPE_OPTS = [['.', '空'], ['H', '暗棋·内容未知'],
       ['R:J','红帅'],['R:S','红仕'],['R:X','红相'],['R:R','红车'],['R:N','红马'],['R:C','红炮'],['R:P','红兵'],
       ['B:J','黑将'],['B:S','黑士'],['B:X','黑象'],['B:R','黑车'],['B:N','黑马'],['B:C','黑炮'],['B:P','黑卒']];
 
@@ -107,7 +106,7 @@
     }
 
     function randSetup(){
-      // 标准 32 子随机摆放,翻开 4 个:内部保留全部内容,渲染时暗棋显示 ■
+      // 公开信息随机局:32 子标准配置随机摆放,4 个翻开为明棋,其余暗棋内容未知(H)
       const pieces = [];
       for(const c of ['R','B']){
         for(const t of ['J','S','S','X','X','R','R','N','N','C','C','P','P','P','P','P']){
@@ -118,9 +117,9 @@
         const j = Math.floor(Math.random() * (i + 1));
         [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
       }
-      const cells2 = pieces.map(p => p + '?');
+      const cells2 = Array(32).fill('H');
       const idxs = [...Array(32).keys()].sort(() => Math.random() - 0.5).slice(0, 4);
-      idxs.forEach(i => { cells2[i] = cells2[i].slice(0, 3); });
+      idxs.forEach(i => { cells2[i] = pieces[i]; });
       return cells2;
     }
 
@@ -129,8 +128,7 @@
 
     function render(){
       infoEl.textContent = '轮到 ' + COLOR_CN[turn] + ' | 红余:' + scores().R + ' 黑余:' + scores().B;
-      const xray = document.getElementById('xray').checked;
-      boardEl.className = 'board' + (xray ? ' xray' : '');
+      boardEl.className = 'board';
       boardEl.innerHTML = '';
       for(let i=0;i<32;i++){
         const orig = (i%4)*8 + Math.floor(i/4);   // 纵向转置渲染
@@ -140,13 +138,10 @@
         let content = '';
         if(c === '.' || c === undefined){
           d.classList.add('empty');
-        } else if(c === 'H'){
+        } else if(c === 'H' || c.endsWith('?')){
+          // 暗棋:内容对所有人未知,一律显示 ■(兼容导入文本中的 R:J?)
           d.classList.add('hidden');
-          content = xray ? '?' : '■';
-        } else if(c.endsWith('?')){
-          d.classList.add('hidden');
-          const parts = c.slice(0,3).split(':');
-          content = xray ? (parts[0] === 'R' ? '红' : '黑') + (PIECE_CN[parts[0]+parts[1]] || c) : '■';
+          content = '■';
         } else {
           const parts = c.split(':');
           d.classList.add(parts[0]);
@@ -177,20 +172,17 @@
         '<div style="margin:6px 0"><select id="typeSel">' + TYPE_OPTS.map(o =>
           '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') +
           '</select></div>',
-        '<label>明置 <input id="revSel" type="checkbox"' + (cur === '.' || cur === 'H' || !cur.endsWith('?') ? ' checked' : '') + '></label> ',
         '<button id="applyBtn">应用</button>',
-        '<span class="hint">勾选明置=明棋,取消=暗棋(暗棋内容仅AI可见,棋盘显示 ■)</span>'
+        '<span class="hint">暗棋=内容未知(所有人不可见);AI 分析时从剩余棋子随机分配</span>'
       ].join('');
       editorEl.innerHTML = h;
       document.getElementById('applyBtn').onclick = applyCell;
     }
 
     function applyCell(){
-      const t = document.getElementById('typeSel').value;
-      const rev = document.getElementById('revSel').checked;
-      if(t === '.' || t === 'H'){ cells[selected] = t; }
-      else { cells[selected] = rev ? t : (t + '?'); }
+      cells[selected] = document.getElementById('typeSel').value;
       analysis = null;
+      hiddenMap = null;
       render();
     }
 
@@ -219,6 +211,7 @@
       }
       analysis = r;
       badCell = -1;
+      hiddenMap = r.hidden_map || null;
       statusEl.textContent = '分析完成(' + r.total + ' 次模拟)';
       render();
     }
@@ -241,7 +234,7 @@
           (i===0?'⭐ 推荐 ':'') + (i+1) + '. ' + m.text + ' — 胜率 ' + (m.win_rate*100).toFixed(1) +
           '% (' + m.visits + '次模拟)</div>').join('') : '<div class="hint">无候选动作</div>';
         html = '<b>AI 分析</b>' + evalLine + list + histHtml +
-          (hasHidden ? '<div class="hint">⚠ 含内容未知暗棋(H):AI 按剩余棋子随机分配,建议在「已吃」中登记被吃棋子以提高准确性</div>' : '') +
+          (hasHidden ? '<div class="hint">⚠ 含暗棋(H):AI 从「标准配置 − 明棋 − 已吃」的剩余棋子中随机分配,推演按该假设进行;固定「种子」可复现</div>' : '') +
           '<div class="hint">点击动作可推演一步(可连续分析多步),支持撤销</div>';
       }
       resultEl.innerHTML = html;
@@ -256,18 +249,28 @@
     }
 
     // —— 本地推演(与引擎规则一致:吃子扣分/炮击移炮/翻棋) ——
+    // 暗棋(H)内容按 AI 分析的分配(hidden_map)推演,仅作为假设预览
     function applyAction(action, text){
       const src = action[1], dst = action[2];
       const t0 = action[0];
       const snap = {cells: cells.slice(), turn: turn, scores: scores()};
       if(t0 === 'flip'){
-        if(cells[src] === 'H'){ alert('目标暗棋内容未知,无法推演(请给暗棋指定内容或重新分析)'); return; }
-        cells[src] = cells[src].slice(0, 3);
+        const c = cells[src];
+        if(c === 'H'){
+          if(hiddenMap && hiddenMap[src]){ cells[src] = hiddenMap[src]; }
+          else { alert('该暗棋内容未知,无法推演(请先「AI 分析」,AI 会按剩余棋子随机分配暗棋内容)'); return; }
+        } else {
+          cells[src] = c.slice(0, 3);
+        }
       } else {
         const mover = cells[src];
         if(mover === undefined){ alert('异常:源格为空'); return; }
-        const tgt = cells[dst];
-        if(tgt === 'H'){ alert('目标暗棋内容未知,无法推演(请给暗棋指定内容或重新分析)'); return; }
+        let tgt = cells[dst];
+        if(tgt === 'H'){
+          // 目标暗棋:按 AI 假设的内容结算
+          if(!hiddenMap || !hiddenMap[dst]){ alert('目标暗棋内容未知,无法推演(请先「AI 分析」)'); return; }
+          tgt = hiddenMap[dst];
+        }
         if(tgt !== undefined && tgt !== '.'){
           // 吃子/炮击结算:吃对方扣对方分;炮击误伤己方暗棋扣自己分
           const tv = VALUE[tgt[2]];
@@ -315,7 +318,7 @@
     // —— 导入/导出/填满暗棋 ——
     function fillHidden(){
       cells = Array(32).fill('H');
-      history = []; analysis = null; selected = -1;
+      history = []; analysis = null; selected = -1; hiddenMap = null;
       render();
     }
 
@@ -374,7 +377,7 @@
           const rm = line.match(/已吃:([^|]+)/);
           if(rm) document.getElementById('removed').value = rm[1].trim();
         }
-        history = []; analysis = null; selected = -1;
+        history = []; analysis = null; selected = -1; hiddenMap = null;
         closeImport();
         render();
       }catch(e){
@@ -395,15 +398,14 @@
     document.getElementById('importOk').onclick = doImport;
     document.getElementById('importCancel').onclick = closeImport;
     document.getElementById('randomBtn').onclick = () => {
-      cells = randSetup(); turn = 'R'; history = []; analysis = null; selected = -1;
+      cells = randSetup(); turn = 'R'; history = []; analysis = null; selected = -1; hiddenMap = null;
       updateScores({R:60, B:60});
       document.getElementById('seed').value = '';
       render();
     };
     document.getElementById('clearBtn').onclick = () => {
-      cells = Array(32).fill('.'); history = []; analysis = null; selected = -1; render();
+      cells = Array(32).fill('.'); history = []; analysis = null; selected = -1; hiddenMap = null; render();
     };
-    document.getElementById('xray').onchange = render;
     document.getElementById('turnSel').onchange = () => { turn = document.getElementById('turnSel').value; analysis = null; render(); };
     document.getElementById('analyzeBtn').onclick = analyze;
 
