@@ -43,6 +43,7 @@
     <label>红余 <input id="scoreR" type="number" value="60" min="0" max="60" style="width:56px"></label>
     <label>黑余 <input id="scoreB" type="number" value="60" min="0" max="60" style="width:56px"></label>
     <label>已吃 <input id="removed" type="text" placeholder="如 B:J,R:P" style="width:90px" title="已被吃掉的棋子(公开信息),逗号分隔,用于暗棋随机分配"></label>
+    <button id="removedBtn" title="可视化登记已吃棋子(历史)">🗑 已吃</button>
     <label>种子 <input id="seed" type="text" placeholder="可选" style="width:70px"></label>
     <button id="analyzeBtn">🎯 AI 分析</button>
     <span id="info"></span>
@@ -65,6 +66,16 @@
       <div class="hint">一行一子,格式 <b>类型@行,列</b>:明棋 R:J@0,0 · 暗棋 H@2,3(内容未知)或 R:J?@1,5(指定内容);# 开头为注释;可粘贴「导出」的内容</div>
       <textarea id="importText" rows="10"></textarea>
       <div><button id="importOk">导入</button> <button id="importCancel">取消</button></div>
+    </div>
+  </div>
+
+  <div id="rmModal" class="modal" style="display:none">
+    <div class="modal-box">
+      <b>🗑 已吃棋子登记(本局历史)</b>
+      <div class="hint">被吃掉的子是全公开历史,AI 分配暗棋时会自动排除已吃子(标准配置 − 盘面明棋 − 已吃)。每种子可登记数自动限制在「上限 = 标准 − 盘上明棋」内,不会超配。</div>
+      <div id="rmBody" style="display:flex;gap:28px;margin:8px 0"></div>
+      <div id="rmPreview" class="hint"></div>
+      <div style="margin-top:8px"><button id="rmOk">确定</button> <button id="rmClear">清空</button> <button id="rmCancel">取消</button></div>
     </div>
   </div>
 
@@ -96,6 +107,9 @@
     const TYPE_OPTS = [['.', '空'], ['H', '暗棋·内容未知'],
       ['R:J','红帅'],['R:S','红仕'],['R:X','红相'],['R:R','红车'],['R:N','红马'],['R:C','红炮'],['R:P','红兵'],
       ['B:J','黑将'],['B:S','黑士'],['B:X','黑象'],['B:R','黑车'],['B:N','黑马'],['B:C','黑炮'],['B:P','黑卒']];
+    // 类型顺序与标准配置(与引擎一致)
+    const TYPE_ORDER = ['J','S','X','R','N','C','P'];
+    const PIECE_COUNT = {'J':1,'S':2,'X':2,'R':2,'N':2,'C':2,'P':5};
 
     async function api(path, body){
       const resp = await fetch(path, {
@@ -186,6 +200,59 @@
       render();
     }
 
+    // —— 已吃登记(可视化面板) ——
+    function parseRemoved(text){
+      const counts = {R:{}, B:{}};
+      for(const c of ['R','B']){ for(const t of TYPE_ORDER) counts[c][t] = 0; }
+      text.split(/[,，\s]+/).map(s=>s.trim()).filter(Boolean).forEach(s => {
+        if(s.length >= 3 && s[1] === ':' && counts[s[0]] && counts[s[0]][s[2]] !== undefined) counts[s[0]][s[2]]++;
+      });
+      return counts;
+    }
+    function onBoardCount(color, t){
+      return cells.filter(c => c === color + ':' + t).length;
+    }
+    function updateRmPreview(counts){
+      const list = [];
+      for(const c of ['R','B']){ for(const t of TYPE_ORDER){ for(let i=0;i<counts[c][t];i++) list.push(c+':'+t); } }
+      document.getElementById('rmPreview').textContent = '已吃登记:' + (list.join(',') || '(无)');
+    }
+    function openRemovedModal(){
+      const counts = parseRemoved(document.getElementById('removed').value);
+      const body = document.getElementById('rmBody');
+      body.innerHTML = ['R','B'].map(color => {
+        const rows = TYPE_ORDER.map(t => {
+          const on = counts[color][t];
+          const max = PIECE_COUNT[t] - onBoardCount(color, t);
+          const over = on > max;
+          return '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">' +
+            '<span style="width:60px">' + PIECE_CN[color+t] + '</span>' +
+            '<button data-c="' + color + '" data-t="' + t + '" data-d="-1">−</button>' +
+            '<span id="n_' + color + t + '" style="width:16px;text-align:center;' + (over ? 'color:#f00' : '') + '">' + on + '</span>' +
+            '<button data-c="' + color + '" data-t="' + t + '" data-d="1">+</button>' +
+            '<span class="hint" style="font-size:11px">盘上' + onBoardCount(color, t) + '/上限' + max + '</span></div>';
+        }).join('');
+        return '<div><b>' + COLOR_CN[color] + '</b>' + rows + '</div>';
+      }).join('');
+      body.onclick = (e) => {
+        const b = e.target.closest('button[data-c]');
+        if(!b) return;
+        const c = b.dataset.c, t = b.dataset.t, d = parseInt(b.dataset.d, 10);
+        const max = PIECE_COUNT[t] - onBoardCount(c, t);
+        counts[c][t] = Math.max(0, Math.min(max, counts[c][t] + d));
+        const nEl = document.getElementById('n_' + c + t);
+        nEl.textContent = counts[c][t];
+        nEl.style.color = '';
+        updateRmPreview(counts);
+      };
+      window._rmCounts = counts;
+      updateRmPreview(counts);
+      document.getElementById('rmModal').style.display = 'flex';
+    }
+    function closeRmModal(){
+      document.getElementById('rmModal').style.display = 'none';
+    }
+
     async function analyze(){
       if(busy) return;
       busy = true;
@@ -233,7 +300,14 @@
           '<div class="adv-item' + (i===0?' adv-top':'') + '" data-i="' + i + '">' +
           (i===0?'⭐ 推荐 ':'') + (i+1) + '. ' + m.text + ' — 胜率 ' + (m.win_rate*100).toFixed(1) +
           '% (' + m.visits + '次模拟)</div>').join('') : '<div class="hint">无候选动作</div>';
-        html = '<b>AI 分析</b>' + evalLine + list + histHtml +
+        // 暗棋池摘要:AI 的假设空间 = 标准配置 − 明棋 − 已吃(历史)
+        let poolHtml = '';
+        if(a.remaining_pool && Object.keys(a.remaining_pool).length){
+          const parts = ['R','B'].map(c => TYPE_ORDER.filter(t => a.remaining_pool[c+t] > 0)
+            .map(t => PIECE_CN[c+t] + '×' + a.remaining_pool[c+t]).join(' '));
+          poolHtml = '<div class="hint">🧩 暗棋池(历史推论):红:' + (parts[0] || '无') + ' | 黑:' + (parts[1] || '无') + '</div>';
+        }
+        html = '<b>AI 分析</b>' + evalLine + list + histHtml + poolHtml +
           (hasHidden ? '<div class="hint">⚠ 含暗棋(H):AI 从「标准配置 − 明棋 − 已吃」的剩余棋子中随机分配,推演按该假设进行;固定「种子」可复现</div>' : '') +
           '<div class="hint">点击动作可推演一步(可连续分析多步),支持撤销</div>';
       }
@@ -407,6 +481,24 @@
       cells = Array(32).fill('.'); history = []; analysis = null; selected = -1; hiddenMap = null; render();
     };
     document.getElementById('turnSel').onchange = () => { turn = document.getElementById('turnSel').value; analysis = null; render(); };
+    document.getElementById('removedBtn').onclick = openRemovedModal;
+    document.getElementById('rmOk').onclick = () => {
+      const counts = window._rmCounts;
+      const list = [];
+      for(const c of ['R','B']){ for(const t of TYPE_ORDER){ for(let i=0;i<counts[c][t];i++) list.push(c+':'+t); } }
+      document.getElementById('removed').value = list.join(',');
+      closeRmModal();
+    };
+    document.getElementById('rmClear').onclick = () => {
+      const counts = window._rmCounts;
+      for(const c of ['R','B']){ for(const t of TYPE_ORDER){ counts[c][t] = 0; } }
+      const body = document.getElementById('rmBody');
+      for(const c of ['R','B']){ for(const t of TYPE_ORDER){
+        document.getElementById('n_' + c + t).textContent = '0';
+      } }
+      updateRmPreview(counts);
+    };
+    document.getElementById('rmCancel').onclick = closeRmModal;
     document.getElementById('analyzeBtn').onclick = analyze;
 
     cells = randSetup();

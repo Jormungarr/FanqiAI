@@ -18,11 +18,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 try:
-    from engine import GameState
+    from engine import GameState, TYPE_ORDER, PIECE_COUNT
     from ai import RandomAgent, PreferHighValueAgent
     from ai_mcts import MCTSAgent, evaluate_moves
 except ImportError:
-    from game.fanqi.engine import GameState
+    from game.fanqi.engine import GameState, TYPE_ORDER, PIECE_COUNT
     from game.fanqi.ai import RandomAgent, PreferHighValueAgent
     from game.fanqi.ai_mcts import MCTSAgent, evaluate_moves
 
@@ -315,11 +315,25 @@ class Handler(BaseHTTPRequestHandler):
                 if s == 'H':
                     p = game.board[i]
                     hidden_map[str(i)] = f'{p.color}:{p.ptype}'
+            # 剩余暗棋池摘要(标准配置 − 明棋 − 已吃):AI 的假设空间
+            pool = {}
+            for color in ('R', 'B'):
+                for t in TYPE_ORDER:
+                    n = PIECE_COUNT[t]
+                    for i, s in enumerate(board):
+                        if s == f'{color}:{t}':
+                            n -= 1
+                    for s in (removed or []):
+                        if s == f'{color}:{t}':
+                            n -= 1
+                    if n > 0:
+                        pool[f'{color}{t}'] = n
             self._send_json({'ok': True, 'turn': turn,
                              'eval_win_rate': round(info['turn_win_rate'], 4)
                              if info['turn_win_rate'] is not None else None,
                              'total': info['total'], 'moves': moves,
-                             'hidden_map': hidden_map})
+                             'hidden_map': hidden_map,
+                             'remaining_pool': pool})
         else:
             self._send_json({'error': 'not found'}, 404)
 

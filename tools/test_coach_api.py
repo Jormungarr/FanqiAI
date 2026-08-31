@@ -72,6 +72,10 @@ hm = r1['hidden_map']
 assert set(hm.keys()) == {'2', '3', '4'}, 'hidden_map 应覆盖全部 H 格,实际: %s' % sorted(hm.keys())
 assert all(v not in ('R:J',) for v in hm.values()), '暗棋分配不应包含棋盘上的明棋'
 print('   hidden_map:', hm)
+# remaining_pool:盘面明棋(红帅)已剔除,黑将仍在池
+pool = r1['remaining_pool']
+assert 'RJ' not in pool and 'BJ' in pool, '暗棋池应剔除盘面红帅、保留黑将: %s' % pool
+print('   暗棋池:', pool)
 
 # 用例C2: 配额只约束明棋——5明兵+2暗兵(内容指定,引擎兼容)不报错;
 # 但 6 个明兵必须报错(录入错误)
@@ -94,6 +98,22 @@ for i in range(5, 15):
 r = test('5明兵+10暗棋:暗棋无兵', {'board': board, 'turn': 'R', 'seed': 7}, True)
 assert all(v != 'R:P' for v in r['hidden_map'].values()), '5个红兵已全部翻开,暗棋里不应再有红兵: %s' % r['hidden_map']
 print('   暗棋分配无红兵 OK:', sorted(set(r['hidden_map'].values())))
+assert 'RP' not in r['remaining_pool'], '暗棋池应已剔除 5 个明红兵: %s' % r['remaining_pool']
+assert r['remaining_pool'].get('BP') == 5, '黑卒应全部在池: %s' % r['remaining_pool']
+print('   暗棋池摘要 OK:', r['remaining_pool'])
+
+# 用例C4: removed(已吃历史)纳入暗棋池与配额:黑将已吃 -> 池中无黑将
+board = ['.'] * 32
+board[0] = 'R:J'
+board[1] = 'H'
+board[2] = 'H'
+r = test('removed黑将入池剔除', {'board': board, 'turn': 'R', 'removed': ['B:J']}, True)
+assert 'BJ' not in r['remaining_pool'], '黑将已吃,暗棋池应无黑将: %s' % r['remaining_pool']
+assert all(v != 'B:J' for v in r['hidden_map'].values()), '暗棋不应分配已吃的黑将: %s' % r['hidden_map']
+print('   removed 剔除 OK,暗棋池:', r['remaining_pool'])
+# 已吃与盘面明棋冲突(黑将已吃,但盘面还有明黑将) -> 报错(明棋超配定位到冲突格)
+board[1] = 'B:J'
+r = test('removed与明棋冲突报错', {'board': board, 'turn': 'R', 'removed': ['B:J']}, False, expect_err='cell 1')
 
 # 用例D: 无合法动作(全是己方明棋包围?直接空棋盘)
 r = test('空棋盘(无合法动作)', {'board': ['.'] * 32, 'turn': 'R'}, True)
