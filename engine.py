@@ -208,17 +208,11 @@ class GameState:
                         if self.board[j] is not None:
                             seen += 1
                             if seen == 2:
-                                # candidate target
-                                # cannon cannot target a revealed own piece
+                                # candidate target: seen==2 means there IS a piece here, so cannot be empty
+                                # cannon can blind-shot unrevealed or capture revealed opponent; cannot target revealed own piece
                                 tgt = self.board[j]
-                                if tgt is None:
-                                    pass
-                                else:
-                                    # can blind-shot unrevealed or capture revealed opponent
-                                    if (not tgt.revealed) or (tgt.revealed and tgt.color != color):
-                                        # but cannot target revealed own piece
-                                        if not (tgt.revealed and tgt.color == color):
-                                            actions.append(('cannon', i, j))
+                                if (not tgt.revealed) or (tgt.revealed and tgt.color != color):
+                                    actions.append(('cannon', i, j))
                                 break
                             # else continue
                         nr += dr; nc += dc

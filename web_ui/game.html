@@ -683,6 +683,9 @@
           const mover = cells[src];
           if(mover === undefined){ alert('异常:源格为空'); return; }
           let tgt = cells[dst];
+          if(t0 === 'cannon' && (tgt === '.' || tgt === undefined)){
+            alert('炮不能空打:必须隔一个子作为炮架并命中棋靶'); return;
+          }
           if(tgt === 'H'){
             if(!hiddenMap || !hiddenMap[dst]){ alert('目标暗棋内容未知,无法推演(请先「AI 分析」)'); return; }
             tgt = hiddenMap[dst];
