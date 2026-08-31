@@ -1,0 +1,105 @@
+# FanqiAI — 翻棋(暗棋)规则引擎 · 人机对战 · MCTS 强 AI
+
+一个基于定制规则的翻棋(Chinese Dark Chess / Banqi)项目:规则引擎 + 网页人机对战 + 蒙特卡洛树搜索(MCTS)强 AI + 决策建议(教练模式)。
+
+## 规则概要(完整规则见 [rules.md](rules.md))
+
+- 棋盘 4×8,共 32 子,初始全部暗置,随机翻开 4 子,红方先走
+- **翻棋 / 走子**:翻开暗棋,或移动己方明棋一步(四个方向)
+- **吃子**:按等级大吃小;**同级相吃谁先吃谁存活**;兵可吃将、将帅不能吃兵
+- **炮**:不能普通移动/吃子,只能**炮击**——隔一个子(炮架)直线打击;盲狙暗棋会先翻开展示再结算,打中己方暗棋为误伤(展示并扣除自己的分数);炮击后炮移动到目标格
+- **减分制**:双方剩余分数从 60 开始,吃子扣减对方分数,误伤扣自己;先降到 0(或以下)的一方输;连续 30 步无吃子判和
+
+## 功能特性
+
+| 模块 | 说明 |
+|---|---|
+| `engine.py` | 规则引擎:走法生成与结算一致性维护,支持局面克隆(搜索用) |
+| `ai.py` | 基线 AI:随机策略、偏好策略(有吃就吃) |
+| `ai_mcts.py` | **MCTS 强 AI**:UCT 树搜索 + 吃子优先 rollout,输出每个动作的模拟胜率 |
+| `game_server.py` | 人机对战 HTTP 服务器(线程安全,单会话) |
+| `web_ui/play.html` | 对战页面:翻子/选子/走子/炮击交互、历史记录、💡 决策建议 |
+| `web_ui/index.html` | 静态回放查看器 |
+| `simulator.py` | 终端 CLI:自我对弈、实时演示、回放保存/加载/HTML 导出 |
+| `tools/` | 验证与训练脚本(见下) |
+
+## 快速开始
+
+```bash
+# 人机对战(浏览器打开 http://localhost:8000/web_ui/play.html)
+python game_server.py --port 8000
+
+# 终端自我对弈(规则回归验证)
+python simulator.py --games 10 --seed 42
+
+# 终端实时演示
+python simulator.py --games 1 --seed 42 --live --delay 0.5
+```
+
+### 网页对战操作
+
+- 点 **■** 暗棋翻子;点己方明棋选中,高亮目标后点击走子/吃子
+- 选中**炮**后,隔一子的目标红色高亮,点击炮击(盲狙先翻开展示再结算)
+- 难度可选:随机 / 偏好策略 / **MCTS(强,默认)**
+- **💡 建议**按钮:对当前局面做 MCTS 搜索,返回所有候选动作的模拟胜率排名,点击可直接代走
+
+## MCTS 强 AI
+
+- **UCT 树搜索**:节点统计「轮到该节点行动方」的胜率,选择时取对手胜率最小的分支(等价标准 argmax)
+- **rollout 策略**:吃子/炮击优先(70%),否则优先翻棋,最后才移动;80 步截断按剩余分数差启发
+- **决策建议**:一次搜索输出全部候选动作的胜率(模拟次数标注),供 `💡 建议` 使用
+- **性能**:开局局面约 1500 次模拟/秒(单核),1.5s 预算约 2000+ 次模拟
+
+## 训练与评估
+
+| 对手 | 战绩(MCTS 1.0~1.5s/步) |
+|---|---|
+| vs 偏好 AI(目标对手) | **28-0** |
+| vs 随机 AI | **8-0** |
+
+训练/评估脚本(`tools/`):
+
+```bash
+# 对战基准: python tools/bench_mcts.py <秒/步> <轮数> <rollout: random|prefer> <对手: both|random|prefer>
+python tools/bench_mcts.py 1.0 10 prefer prefer
+
+# 单步正确性诊断(必赢局面)
+python tools/diag_mcts.py
+
+# 对称性/逐步跟踪诊断
+python tools/debug_mcts.py
+
+# 规则场景测试(炮击/误伤/同级相吃等) + 50 局回归
+python tools/verify_cannon.py
+
+# API 冒烟测试(需先启动 game_server.py)
+python tools/smoke_test_api.py
+```
+
+## 项目结构
+
+```
+fanqi/
+├── engine.py          # 规则引擎
+├── ai.py              # 基线 AI(随机/偏好)
+├── ai_mcts.py         # MCTS 强 AI
+├── game_server.py     # 人机对战服务器
+├── simulator.py       # 终端模拟器/回放
+├── replay.py          # HTML 回放导出
+├── rules.md           # 完整规则文档
+├── web_ui/            # 网页对战 + 回放查看器
+├── tools/             # 验证/训练/诊断脚本
+└── replay_samples/    # 回放示例
+```
+
+## 测试与验证
+
+- `tools/verify_cannon.py`:炮击盲狙、误伤自罚、炮跟进落位、将帅禁食兵卒、炮仅炮击、同级相吃 6 大场景 + 50 局随机回归(0 非法动作)
+- `tools/smoke_test_api.py`:对战 API 全链路冒烟(新对局/翻子/AI 回应/合法走法/非法拦截/决策建议)
+- `tools/diag_mcts.py`:MCTS 单步正确性(必赢局面必选对)
+
+## 参考
+
+- *Incorporating Domain Knowledge Into Monte Carlo Tree Search in Dark Chess* (Yen et al., 2024)
+- *AlphaZero for a Non-Deterministic Game* (Hsueh & Wu, TAAI 2018)
+- Chess Programming Wiki: Chinese Dark Chess

@@ -1,0 +1,205 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Fanqi Replay Viewer</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;margin:16px}
+    .board{display:grid;grid-template-columns:repeat(8,56px);gap:6px;margin-top:12px}
+    .cell{width:56px;height:56px;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;font-weight:700}
+    .R{background:#ffecec;color:#900}
+    .B{background:#ecf0ff;color:#034}
+    .empty{background:#fafafa;border-color:#eee}
+    .hidden{background:#444;color:#888;border-color:#555}
+    .controls{display:flex;gap:8px;align-items:center}
+  </style>
+</head>
+<body>
+  <h2>Fanqi 回放查看器 <a href="play.html" style="font-size:14px">去人机对战 →</a></h2>
+  <div class="controls">
+    <input id="file" type="file" accept="application/json">
+    <button id="loadSample">加载内置示例</button>
+    <button id="play">Play</button>
+    <button id="pause">Pause</button>
+    <button id="step">Step</button>
+    <label>纵向 <input id="vertical" type="checkbox" checked></label>
+    <label>Speed <input id="speed" type="range" min="50" max="2000" value="500"></label>
+    <span id="info"></span>
+  </div>
+  <div id="debug" style="margin-top:10px;font-family:monospace;white-space:pre-wrap;background:#f7f7f7;padding:8px;border:1px solid #eee;max-height:240px;overflow:auto"></div>
+  <div id="board" class="board"></div>
+
+  <script>
+    const boardEl = document.getElementById('board');
+    const info = document.getElementById('info');
+    const fileInput = document.getElementById('file');
+    const loadSample = document.getElementById('loadSample');
+    const playBtn = document.getElementById('play');
+    const pauseBtn = document.getElementById('pause');
+    const stepBtn = document.getElementById('step');
+    const speed = document.getElementById('speed');
+
+    let states = [];
+    let idx = 0; let timer = null; let delay = 500;
+
+    function renderState(s){
+      if(!s) return;
+      boardEl.innerHTML='';
+      let arr = Array.isArray(s.board) ? s.board.slice() : [];
+      // ensure length == 32
+      if(arr.length < 32){
+        const pad = new Array(32 - arr.length).fill('.');
+        arr = arr.concat(pad);
+      } else if(arr.length > 32){
+        arr = arr.slice(0,32);
+      }
+      const vertical = document.getElementById('vertical').checked;
+      if(vertical){
+        // transpose 4x8 -> 8x4
+        const t = [];
+        for(let c=0;c<8;c++){
+          for(let r=0;r<4;r++) t.push(arr[r*8 + c]);
+        }
+        arr = t;
+        boardEl.style.gridTemplateColumns = 'repeat(4,56px)';
+      } else {
+        boardEl.style.gridTemplateColumns = 'repeat(8,56px)';
+      }
+      arr.forEach(cell=>{
+        const d=document.createElement('div'); d.className='cell';
+        // normalize cell to string (treat null/undefined/non-string as empty)
+        const cellStr = (typeof cell === 'string') ? cell : (cell == null ? '.' : String(cell));
+        if(cellStr === '.'){
+          d.classList.add('empty'); d.textContent='';
+        } else {
+          const parts = cellStr.split(':');
+          const col = parts[0] || '';
+          const pt = parts[1] || '';
+          const rev = parts[2] || '0';
+          if(rev === '0'){
+            d.classList.add('hidden'); d.textContent='■';
+          } else {
+            if(col) d.classList.add(col);
+            d.textContent = col + pt;
+          }
+        }
+        boardEl.appendChild(d);
+      });
+      info.textContent = `step ${s.step} ${s.player} ${s.action} scores R/B:${s.scores.R}/${s.scores.B}`;
+      updateDebug();
+    }
+
+    function step(){
+      if(idx>=states.length) { clearInterval(timer); timer=null; info.textContent = `播放完毕，共 ${states.length} 步。再点 Play 可重新播放`; return; }
+      try{
+        renderState(states[idx]);
+      }catch(err){
+        const dbg = document.getElementById('debug');
+        if(dbg) dbg.textContent += '\nRENDER_ERROR at step '+idx+': '+ (err && err.stack ? err.stack : String(err));
+        console.error('render error', err);
+      }
+      idx++;
+    }
+
+    playBtn.onclick = ()=>{ if(timer) clearInterval(timer); if(idx>=states.length){ idx=0; } timer=setInterval(step,delay); };
+    pauseBtn.onclick = ()=>{ if(timer) clearInterval(timer); timer=null; };
+    stepBtn.onclick = ()=>{ pauseBtn.click(); step(); };
+    speed.oninput = ()=>{ delay = parseInt(speed.value); if(timer){ clearInterval(timer); timer=setInterval(step,delay);} };
+
+    fileInput.onchange = e=>{
+      const f = e.target.files[0]; if(!f) return;
+      const reader = new FileReader();
+      reader.onload = ev=>{ try{ let rep = JSON.parse(ev.target.result); if(rep && rep.moves) { window._kifu_meta = rep.meta || {}; rep = rep.moves; } else { window._kifu_meta = {}; } prepareStatesFromReplay(rep); idx=0; try{ renderState(states[0]); }catch(err){ const dbg=document.getElementById('debug'); if(dbg) dbg.textContent += '\nRENDER_ERROR initial: '+(err && err.stack?err.stack:String(err)); console.error(err);} }catch(err){ alert('无法解析 JSON'); }};
+      reader.readAsText(f);
+    };
+
+    loadSample.onclick = async ()=>{
+      let rep = null;
+      for(const p of ['../replay_samples/generated_replay.json', '../replay_samples/test_replay.json']){
+        try{
+          const resp = await fetch(p);
+          if(resp.ok){ rep = await resp.json(); break; }
+        }catch(e){ /* ignore, try next */ }
+      }
+      let note = '';
+      if(!rep){ rep = EMBEDDED_SAMPLE; note = EMBEDDED_NOTE; window._kifu_meta = {}; }
+      else if(rep && rep.moves){ window._kifu_meta = rep.meta || {}; rep = rep.moves; }
+      else { window._kifu_meta = {}; }
+      prepareStatesFromReplay(rep); idx=0;
+      try{ renderState(states[0]); }catch(err){ console.error('render error', err); }
+      if(note){ info.textContent = note + '（共 ' + states.length + ' 步）'; }
+    };
+
+    function prepareStatesFromReplay(rep){
+      states = [];
+      let prev = new Array(32).fill('.');
+      for(let i=0;i<rep.length;i++){
+        const s = rep[i];
+        let board = Array.isArray(s && s.board) ? s.board.slice() : [];
+        // sanitize entries: ensure each cell is a string ('.' for empty/null)
+        board = board.map(c => (typeof c === 'string' ? c : (c == null ? '.' : String(c))));
+        if(board.length !== 32){
+          // fallback to previous board if available, else pad
+          if(prev && prev.length===32){
+            board = prev.slice();
+          } else {
+            board = board.concat(new Array(Math.max(0,32-board.length)).fill('.'));
+          }
+        }
+        prev = board.slice();
+        states.push({step:i, player:s.player, action: JSON.stringify(s.action), scores:s.scores || {R:0,B:0}, board:board});
+      }
+      if(states.length===0){
+        // ensure at least one state for UI
+        states.push({step:0,player:'',action:'',scores:{R:0,B:0},board:prev});
+      }
+      updateDebug();
+    }
+
+
+    function updateDebug(){
+      const dbg = document.getElementById('debug');
+      if(!dbg) return;
+      const lines = [];
+      const meta = window._kifu_meta || {};
+      if(meta && meta.winner){
+        lines.push(`meta.winner: ${meta.winner}`);
+      }
+      lines.push(`states: ${states.length}`);
+      lines.push(`current idx: ${idx} (0-based)`);
+      // show first 12 steps summary of board lengths
+      const maxShow = Math.min(12, states.length);
+      for(let i=0;i<maxShow;i++){
+        const b = Array.isArray(states[i].board) ? states[i].board.length : 0;
+        lines.push(`step ${i}: board_len=${b}`);
+      }
+      if(states.length>maxShow) lines.push(`... (${states.length-maxShow} more steps)`);
+      dbg.textContent = lines.join('\n');
+    }
+
+    // embedded fallback replay (used when fetch fails, e.g. opened via file://)
+    const EMBEDDED_SAMPLE = [{"player":"R","action":["flip",21],"reason":"flip","scores":{"R":0,"B":0},"board":["B:C:0","R:R:0","R:C:0","R:P:0","B:C:0","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:0","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","B:R:1","R:X:1","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:0"]},{"player":"B","action":["flip",1],"reason":"flip","scores":{"R":0,"B":0},"board":["B:C:0","R:R:1","R:C:0","R:P:0","B:C:0","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:0","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","B:R:1","R:X:1","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:0"]},{"player":"R","action":["flip",4],"reason":"flip","scores":{"R":0,"B":0},"board":["B:C:0","R:R:1","R:C:0","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:0","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","B:R:1","R:X:1","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:0"]},{"player":"B","action":["flip",12],"reason":"flip","scores":{"R":0,"B":0},"board":["B:C:0","R:R:1","R:C:0","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:1","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","B:R:1","R:X:1","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:0"]},{"player":"R","action":["flip",0],"reason":"flip","scores":{"R":0,"B":0},"board":["B:C:1","R:R:1","R:C:0","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:1","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","B:R:1","R:X:1","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:0"]},{"player":"B","action":["flip",31],"reason":"flip","scores":{"R":0,"B":0},"board":["B:C:1","R:R:1","R:C:0","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:1","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","B:R:1","R:X:1","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"R","action":["capture",23,22],"reason":"capture","scores":{"R":5,"B":0},"board":["B:C:1","R:R:1","R:C:0","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:1","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"B","action":["cannon",0,2],"reason":"cannon","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:1","R:P:0","B:N:0","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"R","action":["flip",14],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:0","B:J:0","R:C:0","B:P:1","R:P:0","B:N:1","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"B","action":["flip",9],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:1","B:J:0","R:C:0","B:P:1","R:P:0","B:N:1","B:X:0","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"R","action":["flip",15],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:1","B:J:0","R:C:0","B:P:1","R:P:0","B:N:1","B:X:1","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:0","R:X:1","B:P:0","B:P:0","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"B","action":["flip",27],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:1","B:J:0","R:C:0","B:P:1","R:P:0","B:N:1","B:X:1","B:P:0","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:0","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"R","action":["flip",16],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:1","B:J:0","R:C:0","B:P:1","R:P:0","B:N:1","B:X:1","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:0","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"B","action":["flip",24],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:1","B:J:0","R:C:0","B:P:1","R:P:0","B:N:1","B:X:1","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"R","action":["flip",10],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:1","B:J:1","R:C:0","B:P:1","R:P:0","B:N:1","B:X:1","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"B","action":["capture",14,22],"reason":"invalid capture by rank","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:0","R:P:1","B:J:1","R:C:0","B:P:1","R:P:0","B:N:1","B:X:1","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"R","action":["flip",8],"reason":"flip","scores":{"R":5,"B":5},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","R:R:1","B:X:1","R:P:1","B:J:1","R:C:0","B:P:1","R:P:0","B:N:1","B:X:1","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"B","action":["capture",15,7],"reason":"capture","scores":{"R":5,"B":10},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","B:X:1","B:X:1","R:P:1","B:J:1","R:C:0","B:P:1","R:P:0","B:N:1",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1",".","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","R:N:1"]},{"player":"R","action":["move",31,23],"reason":"move","scores":{"R":5,"B":10},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","B:X:1","B:X:1","R:P:1","B:J:1","R:C:0","B:P:1","R:P:0","B:N:1",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["capture",24,25],"reason":"invalid capture by rank","scores":{"R":5,"B":10},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","B:X:1","B:X:1","R:P:1","B:J:1","R:C:0","B:P:1","R:P:0","B:N:1",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1","R:X:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["capture",22,14],"reason":"capture","scores":{"R":10,"B":10},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","B:X:1","B:X:1","R:P:1","B:J:1","R:C:0","B:P:1","R:P:0","R:X:1",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["flip",11],"reason":"flip","scores":{"R":10,"B":10},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:0","B:X:1","B:X:1","R:P:1","B:J:1","R:C:1","B:P:1","R:P:0","R:X:1",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["flip",6],"reason":"flip","scores":{"R":10,"B":10},"board":["B:C:1","R:R:1",".","R:P:0","B:C:1","R:P:0","B:R:1","B:X:1","B:X:1","R:P:1","B:J:1","R:C:1","B:P:1","R:P:0","R:X:1",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["cannon",4,1],"reason":"cannon","scores":{"R":10,"B":15},"board":["B:C:1",".",".","R:P:0","B:C:1","R:P:0","B:R:1","B:X:1","B:X:1","R:P:1","B:J:1","R:C:1","B:P:1","R:P:0","R:X:1",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["capture",14,6],"reason":"capture","scores":{"R":15,"B":15},"board":["B:C:1",".",".","R:P:0","B:C:1","R:P:0","R:X:1","B:X:1","B:X:1","R:P:1","B:J:1","R:C:1","B:P:1","R:P:0",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["capture",10,11],"reason":"capture","scores":{"R":15,"B":20},"board":["B:C:1",".",".","R:P:0","B:C:1","R:P:0","R:X:1","B:X:1","B:X:1","R:P:1",".","B:J:1","B:P:1","R:P:0",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["move",9,1],"reason":"move","scores":{"R":15,"B":20},"board":["B:C:1","R:P:1",".","R:P:0","B:C:1","R:P:0","R:X:1","B:X:1","B:X:1",".",".","B:J:1","B:P:1","R:P:0",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["cannon",4,6],"reason":"cannon","scores":{"R":15,"B":25},"board":["B:C:1","R:P:1",".","R:P:0","B:C:1","R:P:0",".","B:X:1","B:X:1",".",".","B:J:1","B:P:1","R:P:0",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["flip",5],"reason":"flip","scores":{"R":15,"B":25},"board":["B:C:1","R:P:1",".","R:P:0","B:C:1","R:P:1",".","B:X:1","B:X:1",".",".","B:J:1","B:P:1","R:P:0",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["move",21,22],"reason":"move","scores":{"R":15,"B":25},"board":["B:C:1","R:P:1",".","R:P:0","B:C:1","R:P:1",".","B:X:1","B:X:1",".",".","B:J:1","B:P:1","R:P:0",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["flip",3],"reason":"flip","scores":{"R":15,"B":25},"board":["B:C:1","R:P:1",".","R:P:1","B:C:1","R:P:1",".","B:X:1","B:X:1",".",".","B:J:1","B:P:1","R:P:0",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["flip",13],"reason":"flip","scores":{"R":15,"B":25},"board":["B:C:1","R:P:1",".","R:P:1","B:C:1","R:P:1",".","B:X:1","B:X:1",".",".","B:J:1","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0","B:S:0","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["flip",19],"reason":"flip","scores":{"R":15,"B":25},"board":["B:C:1","R:P:1",".","R:P:1","B:C:1","R:P:1",".","B:X:1","B:X:1",".",".","B:J:1","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0","B:S:1","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"B","action":["capture",11,3],"reason":"capture","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".","B:X:1","B:X:1",".",".",".","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0","B:S:1","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:0","."]},{"player":"R","action":["flip",30],"reason":"flip","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".","B:X:1","B:X:1",".",".",".","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0","B:S:1","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:1","."]},{"player":"B","action":["move",7,6],"reason":"move","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1","B:X:1",".","B:X:1",".",".",".","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0","B:S:1","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:1","."]},{"player":"R","action":["capture",1,0],"reason":"invalid capture by rank","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1","B:X:1",".","B:X:1",".",".",".","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0","B:S:1","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:1","."]},{"player":"B","action":["move",19,11],"reason":"move","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1","B:X:1",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0",".","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:1","."]},{"player":"R","action":["capture",23,22],"reason":"invalid capture by rank","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1","B:X:1",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1",".",".","B:P:1","R:S:0","R:P:0",".","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:1","."]},{"player":"B","action":["move",6,14],"reason":"move","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1","B:X:1",".","B:P:1","R:S:0","R:P:0",".","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0","R:J:1","."]},{"player":"R","action":["move",30,31],"reason":"move","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1","B:X:1",".","B:P:1","R:S:0","R:P:0",".","R:S:0",".","B:S:1","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"B","action":["move",22,21],"reason":"move","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1","B:X:1",".","B:P:1","R:S:0","R:P:0",".","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"R","action":["flip",17],"reason":"flip","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1","B:X:1",".","B:P:1","R:S:1","R:P:0",".","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"B","action":["move",14,15],"reason":"move","scores":{"R":15,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1",".","B:X:1","B:P:1","R:S:1","R:P:0",".","R:S:0","B:S:1",".","R:N:1","B:P:1","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"R","action":["capture",25,24],"reason":"capture","scores":{"R":17,"B":27},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1","B:P:1","R:P:1",".","B:X:1","B:P:1","R:S:1","R:P:0",".","R:S:0","B:S:1",".","R:N:1","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"B","action":["capture",12,13],"reason":"capture","scores":{"R":17,"B":29},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1",".",".",".","B:X:1","B:P:1","R:S:1","R:P:0",".","R:S:0","B:S:1",".","R:N:1","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"R","action":["capture",1,0],"reason":"invalid capture by rank","scores":{"R":17,"B":29},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".","B:S:1",".",".",".","B:X:1","B:P:1","R:S:1","R:P:0",".","R:S:0","B:S:1",".","R:N:1","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"B","action":["move",11,19],"reason":"move","scores":{"R":17,"B":29},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".",".",".",".",".","B:X:1","B:P:1","R:S:1","R:P:0","B:S:1","R:S:0","B:S:1",".","R:N:1","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"R","action":["move",24,25],"reason":"move","scores":{"R":17,"B":29},"board":["B:C:1","R:P:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".",".",".",".",".","B:X:1","B:P:1","R:S:1","R:P:0","B:S:1","R:S:0","B:S:1",".","R:N:1",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"B","action":["capture",0,1],"reason":"capture","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".",".",".",".",".","B:X:1","B:P:1","R:S:1","R:P:0","B:S:1","R:S:0","B:S:1",".","R:N:1",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"R","action":["capture",5,4],"reason":"invalid capture by rank","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".",".",".",".",".","B:X:1","B:P:1","R:S:1","R:P:0","B:S:1","R:S:0","B:S:1",".","R:N:1",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"B","action":["flip",20],"reason":"flip","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1",".",".",".",".",".",".","B:X:1","B:P:1","R:S:1","R:P:0","B:S:1","R:S:1","B:S:1",".","R:N:1",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"R","action":["move",17,9],"reason":"move","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1","R:S:1",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1",".","R:N:1",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:0",".","R:J:1"]},{"player":"B","action":["flip",29],"reason":"flip","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1","R:S:1",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1",".","R:N:1",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["move",23,22],"reason":"move","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1","R:S:1",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1","R:N:1",".",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["capture",1,9],"reason":"invalid capture by rank","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1","R:S:1",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1","R:N:1",".",".","R:X:1","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["move",25,24],"reason":"move","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1","R:S:1",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["capture",8,9],"reason":"invalid capture by rank","scores":{"R":17,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","B:X:1","R:S:1",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["capture",9,8],"reason":"capture","scores":{"R":22,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","R:S:1",".",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["move",1,0],"reason":"move","scores":{"R":22,"B":31},"board":["B:C:1",".",".","B:J:1","B:C:1","R:P:1",".",".","R:S:1",".",".",".",".",".",".","B:X:1","B:P:1",".","R:P:0","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["flip",18],"reason":"flip","scores":{"R":22,"B":31},"board":["B:C:1",".",".","B:J:1","B:C:1","R:P:1",".",".","R:S:1",".",".",".",".",".",".","B:X:1","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["move",0,1],"reason":"move","scores":{"R":22,"B":31},"board":[".","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".","R:S:1",".",".",".",".",".",".","B:X:1","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["move",8,0],"reason":"move","scores":{"R":22,"B":31},"board":["R:S:1","B:C:1",".","B:J:1","B:C:1","R:P:1",".",".",".",".",".",".",".",".",".","B:X:1","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["move",3,11],"reason":"move","scores":{"R":22,"B":31},"board":["R:S:1","B:C:1",".",".","B:C:1","R:P:1",".",".",".",".",".","B:J:1",".",".",".","B:X:1","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","R:N:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["move",22,14],"reason":"move","scores":{"R":22,"B":31},"board":["R:S:1","B:C:1",".",".","B:C:1","R:P:1",".",".",".",".",".","B:J:1",".",".","R:N:1","B:X:1","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1",".",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["capture",15,14],"reason":"capture","scores":{"R":22,"B":36},"board":["R:S:1","B:C:1",".",".","B:C:1","R:P:1",".",".",".",".",".","B:J:1",".",".","B:X:1",".","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1",".",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["move",20,12],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1","B:C:1",".",".","B:C:1","R:P:1",".",".",".",".",".","B:J:1","R:S:1",".","B:X:1",".","B:P:1",".","R:P:1","B:S:1",".","B:S:1",".",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["move",29,30],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1","B:C:1",".",".","B:C:1","R:P:1",".",".",".",".",".","B:J:1","R:S:1",".","B:X:1",".","B:P:1",".","R:P:1","B:S:1",".","B:S:1",".",".","R:X:1",".","B:P:0","B:P:1","R:N:0",".","B:N:1","R:J:1"]},{"player":"R","action":["move",12,20],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1","B:C:1",".",".","B:C:1","R:P:1",".",".",".",".",".","B:J:1",".",".","B:X:1",".","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1",".",".","R:X:1",".","B:P:0","B:P:1","R:N:0",".","B:N:1","R:J:1"]},{"player":"B","action":["move",14,22],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1","B:C:1",".",".","B:C:1","R:P:1",".",".",".",".",".","B:J:1",".",".",".",".","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0",".","B:N:1","R:J:1"]},{"player":"R","action":["move",5,13],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1","B:C:1",".",".","B:C:1",".",".",".",".",".",".","B:J:1",".","R:P:1",".",".","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0",".","B:N:1","R:J:1"]},{"player":"B","action":["move",1,2],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1",".","B:C:1",".","B:C:1",".",".",".",".",".",".","B:J:1",".","R:P:1",".",".","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0",".","B:N:1","R:J:1"]},{"player":"R","action":["move",13,12],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1",".","B:C:1",".","B:C:1",".",".",".",".",".",".","B:J:1","R:P:1",".",".",".","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0",".","B:N:1","R:J:1"]},{"player":"B","action":["move",30,29],"reason":"move","scores":{"R":22,"B":36},"board":["R:S:1",".","B:C:1",".","B:C:1",".",".",".",".",".",".","B:J:1","R:P:1",".",".",".","B:P:1",".","R:P:1","B:S:1","R:S:1","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["capture",20,19],"reason":"capture","scores":{"R":32,"B":36},"board":["R:S:1",".","B:C:1",".","B:C:1",".",".",".",".",".",".","B:J:1","R:P:1",".",".",".","B:P:1",".","R:P:1",".",".","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"B","action":["move",11,19],"reason":"move","scores":{"R":32,"B":36},"board":["R:S:1",".","B:C:1",".","B:C:1",".",".",".",".",".",".",".","R:P:1",".",".",".","B:P:1",".","R:P:1","B:J:1",".","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:0","B:N:1",".","R:J:1"]},{"player":"R","action":["flip",28],"reason":"flip","scores":{"R":32,"B":36},"board":["R:S:1",".","B:C:1",".","B:C:1",".",".",".",".",".",".",".","R:P:1",".",".",".","B:P:1",".","R:P:1","B:J:1",".","B:S:1","B:X:1",".","R:X:1",".","B:P:0","B:P:1","R:N:1","B:N:1",".","R:J:1"]},{"player":"B","action":["move",22,30],"reason":"move","scores":{"R":32,"B":36},"board":["R:S:1",".","B:C:1",".","B:C:1",".",".",".",".",".",".",".","R:P:1",".",".",".","B:P:1",".","R:P:1","B:J:1",".","B:S:1",".",".","R:X:1",".","B:P:0","B:P:1","R:N:1","B:N:1","B:X:1","R:J:1"]},{"player":"R","action":["move",0,1],"reason":"move","scores":{"R":32,"B":36},"board":[".","R:S:1","B:C:1",".","B:C:1",".",".",".",".",".",".",".","R:P:1",".",".",".","B:P:1",".","R:P:1","B:J:1",".","B:S:1",".",".","R:X:1",".","B:P:0","B:P:1","R:N:1","B:N:1","B:X:1","R:J:1"]},{"player":"B","action":["move",21,13],"reason":"move","scores":{"R":32,"B":36},"board":[".","R:S:1","B:C:1",".","B:C:1",".",".",".",".",".",".",".","R:P:1","B:S:1",".",".","B:P:1",".","R:P:1","B:J:1",".",".",".",".","R:X:1",".","B:P:0","B:P:1","R:N:1","B:N:1","B:X:1","R:J:1"]},{"player":"R","action":["move",24,25],"reason":"move","scores":{"R":32,"B":36},"board":[".","R:S:1","B:C:1",".","B:C:1",".",".",".",".",".",".",".","R:P:1","B:S:1",".",".","B:P:1",".","R:P:1","B:J:1",".",".",".",".",".","R:X:1","B:P:0","B:P:1","R:N:1","B:N:1","B:X:1","R:J:1"]},{"player":"B","action":["cannon",4,28],"reason":"cannon","scores":{"R":32,"B":41},"board":[".","R:S:1","B:C:1",".","B:C:1",".",".",".",".",".",".",".","R:P:1","B:S:1",".",".","B:P:1",".","R:P:1","B:J:1",".",".",".",".",".","R:X:1","B:P:0","B:P:1",".","B:N:1","B:X:1","R:J:1"]},{"player":"R","action":["move",1,9],"reason":"move","scores":{"R":32,"B":41},"board":[".",".","B:C:1",".","B:C:1",".",".",".",".","R:S:1",".",".","R:P:1","B:S:1",".",".","B:P:1",".","R:P:1","B:J:1",".",".",".",".",".","R:X:1","B:P:0","B:P:1",".","B:N:1","B:X:1","R:J:1"]},{"player":"B","action":["move",27,28],"reason":"move","scores":{"R":32,"B":41},"board":[".",".","B:C:1",".","B:C:1",".",".",".",".","R:S:1",".",".","R:P:1","B:S:1",".",".","B:P:1",".","R:P:1","B:J:1",".",".",".",".",".","R:X:1","B:P:0",".","B:P:1","B:N:1","B:X:1","R:J:1"]},{"player":"R","action":["capture",18,19],"reason":"capture","scores":{"R":62,"B":41},"board":[".",".","B:C:1",".","B:C:1",".",".",".",".","R:S:1",".",".","R:P:1","B:S:1",".",".","B:P:1",".",".","R:P:1",".",".",".",".",".","R:X:1","B:P:0",".","B:P:1","B:N:1","B:X:1","R:J:1"]}];
+    const EMBEDDED_NOTE = '⚠ 未能读取本地回放文件（直接双击以 file:// 方式打开时浏览器会禁止）。已改用页面内置的完整回放示例。如需加载自己的回放文件，请在 fanqi 目录运行 python -m http.server 后访问网页';
+
+    // try a list of candidate replay paths (project-relative and root); fall back to embedded sample
+    const candidates = ['../replay_samples/generated_replay.json', '../replay_samples/test_replay.json', '../../test_replay.json'];
+    (async function tryLoad(){
+      for(const p of candidates){
+        try{
+          const r = await fetch(p);
+          if(r.ok){
+            let rep = await r.json();
+            if(rep && rep.moves){ window._kifu_meta = rep.meta || {}; rep = rep.moves; } else { window._kifu_meta = {}; }
+            prepareStatesFromReplay(rep); idx=0; renderState(states[0]);
+            return;
+          }
+        }catch(e){/*ignore*/}
+      }
+      // fallback: no local replay reachable (e.g. opened via file://)
+      window._kifu_meta = {};
+      prepareStatesFromReplay(EMBEDDED_SAMPLE); idx=0; renderState(states[0]);
+      info.textContent = EMBEDDED_NOTE + '（共 ' + states.length + ' 步）';
+    })();
+  </script>
+</body>
+</html>
