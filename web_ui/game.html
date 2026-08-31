@@ -50,6 +50,7 @@
   <div id="playPane">
     <div class="controls">
       <button id="newGame">新对局</button>
+      <button id="editSetupBtn" title="先编辑初始局面(摆棋/调暗棋),再开始人机对弈">✏ 编辑初始局面</button>
       <select id="agentSel">
         <option value="mcts">AI: MCTS(强)</option>
         <option value="prefer">AI: 偏好策略</option>
@@ -124,6 +125,29 @@
     </div>
   </div>
 
+  <div id="initModal" class="modal" style="display:none">
+    <div class="modal-box" style="width:580px">
+      <b>✏ 编辑初始局面</b>
+      <div class="hint">点击格子摆子:先「⬛ 填满暗棋」再逐个设置明棋最快,或「🎲 随机」生成完整局后微调。开始后红方先走,双方 60 分,暗棋内容由 AI 从剩余棋子分配(不预设)。</div>
+      <div class="controls" style="margin:6px 0">
+        <button id="iRandom">🎲 随机</button>
+        <button id="iFill">⬛ 填满暗棋</button>
+        <button id="iClear">清空</button>
+        <span id="iInfo" style="font-size:13px;color:#777"></span>
+      </div>
+      <div id="iBoard" class="board"></div>
+      <div id="iEditor" style="margin-top:8px"></div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <label>执 <select id="iHuman">
+          <option value="R">红</option>
+          <option value="B">黑</option>
+        </select></label>
+        <button id="iStart">▶ 开始对弈</button>
+        <button id="iCancel">取消</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ===== 公共工具 =====
     const PIECE_CN = {
@@ -134,6 +158,28 @@
     const VALUE = {J:30, S:10, X:5, R:5, N:5, C:5, P:2};
     const TYPE_ORDER = ['J','S','X','R','N','C','P'];
     const PIECE_COUNT = {'J':1,'S':2,'X':2,'R':2,'N':2,'C':2,'P':5};
+
+    const TYPE_OPTS = [['.', '空'], ['H', '暗棋·内容未知'],
+      ['R:J','红帅'],['R:S','红仕'],['R:X','红相'],['R:R','红车'],['R:N','红马'],['R:C','红炮'],['R:P','红兵'],
+      ['B:J','黑将'],['B:S','黑士'],['B:X','黑象'],['B:R','黑车'],['B:N','黑马'],['B:C','黑炮'],['B:P','黑卒']];
+
+    function randSetup(){
+      // 公开信息随机局:32 子标准配置随机摆放,4 个翻开为明棋,其余暗棋内容未知(H)
+      const pieces = [];
+      for(const c of ['R','B']){
+        for(const t of ['J','S','S','X','X','R','R','N','N','C','C','P','P','P','P','P']){
+          pieces.push(c + ':' + t);
+        }
+      }
+      for(let i = pieces.length - 1; i > 0; i--){
+        const j = Math.floor(Math.random() * (i + 1));
+        [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
+      }
+      const cells2 = Array(32).fill('H');
+      const idxs = [...Array(32).keys()].sort(() => Math.random() - 0.5).slice(0, 4);
+      idxs.forEach(i => { cells2[i] = pieces[i]; });
+      return cells2;
+    }
 
     async function api(path, body){
       const resp = await fetch(path, {
@@ -373,28 +419,6 @@
       let hiddenMap = null;  // AI 分析的暗棋分配 {idx: 'R:P'}(仅用于推演,不展示)
       let busy = false;
       let source = '手动编辑';  // 局面来源:对局快照 / 手动编辑
-
-      const TYPE_OPTS = [['.', '空'], ['H', '暗棋·内容未知'],
-        ['R:J','红帅'],['R:S','红仕'],['R:X','红相'],['R:R','红车'],['R:N','红马'],['R:C','红炮'],['R:P','红兵'],
-        ['B:J','黑将'],['B:S','黑士'],['B:X','黑象'],['B:R','黑车'],['B:N','黑马'],['B:C','黑炮'],['B:P','黑卒']];
-
-      function randSetup(){
-        // 公开信息随机局:32 子标准配置随机摆放,4 个翻开为明棋,其余暗棋内容未知(H)
-        const pieces = [];
-        for(const c of ['R','B']){
-          for(const t of ['J','S','S','X','X','R','R','N','N','C','C','P','P','P','P','P']){
-            pieces.push(c + ':' + t);
-          }
-        }
-        for(let i = pieces.length - 1; i > 0; i--){
-          const j = Math.floor(Math.random() * (i + 1));
-          [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
-        }
-        const cells2 = Array(32).fill('H');
-        const idxs = [...Array(32).keys()].sort(() => Math.random() - 0.5).slice(0, 4);
-        idxs.forEach(i => { cells2[i] = pieces[i]; });
-        return cells2;
-      }
 
       function scores(){
         return {R: parseInt(document.getElementById('scoreR').value, 10) || 0,
@@ -809,6 +833,77 @@
 
       cells = randSetup();
       render();
+    })();
+
+    // ================= 初始局面编辑(对战前摆棋) =================
+    (function(){
+      const boardEl = document.getElementById('iBoard');
+      const editorEl = document.getElementById('iEditor');
+      const infoEl = document.getElementById('iInfo');
+      let cells = [];
+      let selected = -1;
+
+      function render(){
+        infoEl.textContent = '已摆 ' + cells.filter(c => c && c !== '.').length + ' 子(标准 32 子)';
+        boardEl.innerHTML = '';
+        boardEl.style.gridTemplateColumns = 'repeat(4,56px)';
+        for(let i=0;i<32;i++){
+          const orig = (i%4)*8 + Math.floor(i/4);   // 纵向转置渲染
+          const d = document.createElement('div');
+          d.className = 'cell';
+          const c = cells[orig];
+          let content = '';
+          if(c === '.' || c === undefined){
+            d.classList.add('empty');
+          } else if(c === 'H'){
+            d.classList.add('hidden');
+            content = '■';
+          } else {
+            const parts = c.split(':');
+            d.classList.add(parts[0]);
+            content = PIECE_CN[parts[0]+parts[1]] || c;
+          }
+          d.innerHTML = '<span class="coord">' + Math.floor(orig/8) + ',' + (orig%8) + '</span>' + content;
+          if(orig === selected) d.classList.add('sel');
+          d.addEventListener('click', () => { selected = (selected === orig) ? -1 : orig; render(); });
+          boardEl.appendChild(d);
+        }
+        renderEditor();
+      }
+
+      function renderEditor(){
+        if(selected < 0){ editorEl.innerHTML = '<span class="hint">点击棋盘上的格子后在此设置棋子类型</span>'; return; }
+        const cur = cells[selected] || '.';
+        editorEl.innerHTML = '第 ' + (selected+1) + ' 格(' + (Math.floor(selected/8)+1) + '行 ' + (selected%8+1) + '列):' +
+          '<select id="iTypeSel">' + TYPE_OPTS.map(o =>
+            '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') +
+          '</select> <button id="iApply">应用</button>';
+        document.getElementById('iApply').onclick = () => {
+          cells[selected] = document.getElementById('iTypeSel').value;
+          render();
+        };
+      }
+
+      document.getElementById('editSetupBtn').onclick = () => {
+        cells = Array(32).fill('H');   // 默认标准开局:全暗棋,可先改明棋再开始
+        selected = -1;
+        document.getElementById('initModal').style.display = 'flex';
+        render();
+      };
+      document.getElementById('iCancel').onclick = () => { document.getElementById('initModal').style.display = 'none'; };
+      document.getElementById('iFill').onclick = () => { cells = Array(32).fill('H'); selected = -1; render(); };
+      document.getElementById('iClear').onclick = () => { cells = Array(32).fill('.'); selected = -1; render(); };
+      document.getElementById('iRandom').onclick = () => { cells = randSetup(); selected = -1; render(); };
+      document.getElementById('iStart').onclick = async () => {
+        const r = await api('/api/play/from_setup', {
+          board: cells, turn: 'R', scores: {R: 60, B: 60}, removed: null,
+          agent: document.getElementById('agentSel').value,
+          human_color: document.getElementById('iHuman').value
+        });
+        if(r.error){ alert(r.error); return; }
+        document.getElementById('initModal').style.display = 'none';
+        if(_playLoad) _playLoad(r);
+      };
     })();
 
     // ===== 全局 tab 绑定 =====
