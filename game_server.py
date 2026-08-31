@@ -281,12 +281,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'bad scores'}, 400)
                 return
             seed = body.get('seed')
+            removed = body.get('removed')
+            if removed is not None and not isinstance(removed, list):
+                self._send_json({'error': 'removed must be a list'}, 400)
+                return
             try:
                 time_budget = float(body.get('time_budget', 2.5))
             except (TypeError, ValueError):
                 time_budget = 2.5
             try:
-                game = GameState.from_setup(board, scores=scores, seed=seed)
+                game = GameState.from_setup(board, scores=scores, seed=seed, removed=removed)
             except ValueError as e:
                 self._send_json({'error': str(e)}, 400)
                 return

@@ -6,7 +6,8 @@
   <style>
     body{font-family:system-ui,Segoe UI,Arial;margin:16px}
     .board{display:grid;grid-template-columns:repeat(4,56px);gap:6px;margin-top:12px}
-    .cell{width:56px;height:56px;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;font-weight:700;user-select:none;cursor:pointer;font-size:15px}
+    .cell{width:56px;height:56px;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;font-weight:700;user-select:none;cursor:pointer;font-size:15px;position:relative}
+    .coord{position:absolute;top:1px;left:3px;font-size:9px;color:#999;font-weight:400}
     .R{background:#ffecec;color:#900}
     .B{background:#ecf0ff;color:#034}
     .empty{background:#fafafa;border-color:#eee}
@@ -22,13 +23,19 @@
     .adv-item:hover{border-color:#4a9;background:#eefaf3}
     .adv-top{border-color:#c90;background:#fff7e0;font-weight:600}
     .hint{font-size:12px;color:#777;margin-top:4px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:10}
+    .modal-box{background:#fff;border-radius:8px;padding:14px;width:420px;max-width:92vw}
+    .modal-box textarea{width:100%;box-sizing:border-box;margin:8px 0;font-family:monospace;font-size:12px}
   </style>
 </head>
 <body>
   <h2>Fanqi 指导模式 <a href="play.html" style="font-size:14px">人机对战 →</a> <a href="index.html" style="font-size:14px">回放 →</a></h2>
   <div class="controls">
     <button id="randomBtn">🎲 随机开局</button>
+    <button id="fillBtn">⬛ 填满暗棋</button>
     <button id="clearBtn">清空</button>
+    <button id="importBtn">📋 导入</button>
+    <button id="exportBtn">📤 导出</button>
     <label>透视暗棋 <input id="xray" type="checkbox"></label>
     <label>轮到 <select id="turnSel">
       <option value="R">红方</option>
@@ -36,10 +43,12 @@
     </select></label>
     <label>红余 <input id="scoreR" type="number" value="60" min="0" max="60" style="width:56px"></label>
     <label>黑余 <input id="scoreB" type="number" value="60" min="0" max="60" style="width:56px"></label>
+    <label>已吃 <input id="removed" type="text" placeholder="如 B:J,R:P" style="width:90px" title="已被吃掉的棋子(公开信息),逗号分隔,用于暗棋随机分配"></label>
     <label>种子 <input id="seed" type="text" placeholder="可选" style="width:70px"></label>
     <button id="analyzeBtn">🎯 AI 分析</button>
     <span id="info"></span>
   </div>
+  <div class="hint" style="margin-top:6px">真实对局录入:先「填满暗棋」,再把空格点掉、明棋选中设类型;或「导入」文本(格式 <b>类型@行,列</b>,如 R:J@0,0 / H@2,3,一行一子)。暗棋内容未知,AI 从剩余棋子随机分配。</div>
   <div class="layout">
     <div>
       <div id="status" class="status">点击格子摆子,或点「随机开局」生成完整对局</div>
@@ -48,6 +57,15 @@
     <div class="side">
       <div id="editor" class="panel"><b>格子编辑</b><br><span class="hint">点击棋盘上的格子后在此编辑</span></div>
       <div id="result" class="panel"><b>AI 分析</b><br><span class="hint">编辑好局面后点「🎯 AI 分析」,AI 会给出下一步建议与胜率</span></div>
+    </div>
+  </div>
+
+  <div id="modal" class="modal" style="display:none">
+    <div class="modal-box">
+      <b>📋 导入局面文本</b>
+      <div class="hint">一行一子,格式 <b>类型@行,列</b>:明棋 R:J@0,0 · 暗棋 H@2,3(内容未知)或 R:J?@1,5(指定内容);# 开头为注释;可粘贴「导出」的内容</div>
+      <textarea id="importText" rows="10"></textarea>
+      <div><button id="importOk">导入</button> <button id="importCancel">取消</button></div>
     </div>
   </div>
 
@@ -117,21 +135,23 @@
         const d = document.createElement('div');
         d.className = 'cell';
         const c = cells[orig];
+        let content = '';
         if(c === '.' || c === undefined){
           d.classList.add('empty');
-          d.textContent = '';
         } else if(c === 'H'){
           d.classList.add('hidden');
-          d.textContent = xray ? '?' : '■';
+          content = xray ? '?' : '■';
         } else if(c.endsWith('?')){
           d.classList.add('hidden');
           const parts = c.slice(0,3).split(':');
-          d.textContent = xray ? (parts[0] === 'R' ? '红' : '黑') + (PIECE_CN[parts[0]+parts[1]] || c) : '■';
+          content = xray ? (parts[0] === 'R' ? '红' : '黑') + (PIECE_CN[parts[0]+parts[1]] || c) : '■';
         } else {
           const parts = c.split(':');
           d.classList.add(parts[0]);
-          d.textContent = PIECE_CN[parts[0]+parts[1]] || c;
+          content = PIECE_CN[parts[0]+parts[1]] || c;
         }
+        // 坐标角标:真实棋盘坐标 行,列
+        d.innerHTML = '<span class="coord">' + Math.floor(orig/8) + ',' + (orig%8) + '</span>' + content;
         if(orig === selected) d.classList.add('sel');
         d.addEventListener('click', () => selectCell(orig));
         boardEl.appendChild(d);
@@ -176,8 +196,10 @@
       statusEl.textContent = 'AI 分析中…(约 2~3 秒)';
       document.getElementById('analyzeBtn').disabled = true;
       const seed = document.getElementById('seed').value.trim() || null;
+      const removed = document.getElementById('removed').value.split(/[,，\s]+/).map(s=>s.trim()).filter(Boolean);
       const r = await api('/api/coach/analyze', {
-        board: cells, turn: turn, scores: scores(), seed: seed, time_budget: 2.5
+        board: cells, turn: turn, scores: scores(), seed: seed, time_budget: 2.5,
+        removed: removed.length ? removed : null
       });
       busy = false;
       document.getElementById('analyzeBtn').disabled = false;
@@ -195,6 +217,7 @@
         html = '<b>AI 分析</b><div class="hint">编辑好局面后点「🎯 AI 分析」,AI 会给出下一步建议与胜率</div>' + histHtml;
       } else {
         const a = analysis;
+        const hasHidden = cells.indexOf('H') >= 0;
         const evalLine = a.eval_win_rate == null
           ? '<div><b>该局面已终局,无合法动作</b></div>'
           : '<div>当前局面:' + COLOR_CN[a.turn] + '胜率 <b>' + (a.eval_win_rate*100).toFixed(1) + '%</b> (总模拟 ' + a.total + ' 次)</div>';
@@ -203,6 +226,7 @@
           (i===0?'⭐ 推荐 ':'') + (i+1) + '. ' + m.text + ' — 胜率 ' + (m.win_rate*100).toFixed(1) +
           '% (' + m.visits + '次模拟)</div>').join('') : '<div class="hint">无候选动作</div>';
         html = '<b>AI 分析</b>' + evalLine + list + histHtml +
+          (hasHidden ? '<div class="hint">⚠ 含内容未知暗棋(H):AI 按剩余棋子随机分配,建议在「已吃」中登记被吃棋子以提高准确性</div>' : '') +
           '<div class="hint">点击动作可推演一步(可连续分析多步),支持撤销</div>';
       }
       resultEl.innerHTML = html;
@@ -273,6 +297,84 @@
       render();
     }
 
+    // —— 导入/导出/填满暗棋 ——
+    function fillHidden(){
+      cells = Array(32).fill('H');
+      history = []; analysis = null; selected = -1;
+      render();
+    }
+
+    function exportText(){
+      // 公开视角导出:暗棋统一导出为 H(内容未知),明棋 R:J
+      const lines = ['# Fanqi 局面 | 轮到:' + COLOR_CN[turn] + ' | 红余:' + scores().R + ' 黑余:' + scores().B];
+      for(let i=0;i<32;i++){
+        const c = cells[i];
+        if(c === undefined || c === '.') continue;
+        const r = Math.floor(i/8), col = i%8;
+        lines.push((c === 'H' || c.endsWith('?')) ? ('H@' + r + ',' + col) : (c + '@' + r + ',' + col));
+      }
+      return lines.join('\n');
+    }
+
+    function parseImport(txt){
+      const next = Array(32).fill('.');
+      const seen = new Set();
+      for(const raw of txt.split(/\r?\n/)){
+        const line = raw.trim();
+        if(!line || line.startsWith('#')) continue;
+        const m = line.match(/^(H|R:[A-Z]\??|B:[A-Z]\??)@(\d+),(\d+)$/);
+        if(!m) throw new Error('无法解析: ' + line);
+        const r = parseInt(m[2],10), c = parseInt(m[3],10);
+        if(r < 0 || r > 3 || c < 0 || c > 7) throw new Error('坐标越界: ' + line);
+        const idx = r*8 + c;
+        if(seen.has(idx)) throw new Error('重复格子: ' + line);
+        seen.add(idx);
+        next[idx] = m[1];
+      }
+      return next;
+    }
+
+    function openImport(){
+      document.getElementById('modal').style.display = 'flex';
+      // 预填当前局面(去注释),方便直接修改后导入
+      document.getElementById('importText').value = exportText().split('\n').slice(1).join('\n');
+    }
+
+    function closeImport(){
+      document.getElementById('modal').style.display = 'none';
+    }
+
+    function doImport(){
+      const txt = document.getElementById('importText').value;
+      try{
+        cells = parseImport(txt);
+        // 从注释解析轮到/分数(可选)
+        for(const line of txt.split(/\r?\n/)){
+          const t = line.match(/轮到:(红方|黑方)/);
+          if(t){ turn = (t[1] === '红方') ? 'R' : 'B'; document.getElementById('turnSel').value = turn; }
+          const s = line.match(/红余:(\d+)\s+黑余:(\d+)/);
+          if(s) updateScores({R: parseInt(s[1],10), B: parseInt(s[2],10)});
+        }
+        history = []; analysis = null; selected = -1;
+        closeImport();
+        render();
+      }catch(e){
+        alert('导入失败:' + e.message);
+      }
+    }
+
+    document.getElementById('fillBtn').onclick = fillHidden;
+    document.getElementById('importBtn').onclick = openImport;
+    document.getElementById('exportBtn').onclick = () => {
+      const txt = exportText();
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(() => alert('已复制到剪贴板')).catch(() => alert('复制失败,请手动复制:\n\n' + txt));
+      } else {
+        alert('请手动复制:\n\n' + txt);
+      }
+    };
+    document.getElementById('importOk').onclick = doImport;
+    document.getElementById('importCancel').onclick = closeImport;
     document.getElementById('randomBtn').onclick = () => {
       cells = randSetup(); turn = 'R'; history = []; analysis = null; selected = -1;
       updateScores({R:60, B:60});

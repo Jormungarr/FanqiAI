@@ -80,7 +80,7 @@ class GameState:
             self.board[idx].revealed = True
 
     @classmethod
-    def from_setup(cls, desc, scores=None, seed=None):
+    def from_setup(cls, desc, scores=None, seed=None, removed=None):
         """从局面描述构造任意局面(供指导/残局练习)。
 
         desc: 长度 32 的列表,每格取值:
@@ -89,6 +89,8 @@ class GameState:
           'R:J?'          -> 暗棋(内容指定,上帝视角)
           'H'             -> 暗棋(内容未指定,从剩余标准棋子随机分配)
         scores: 剩余分数,默认双方 60。
+        removed: 已移除(被吃)棋子列表,如 ['B:J', 'R:P']——这些棋子不会
+          再被随机分配给未指定内容的暗棋(H),用于贴近真实对局的公开信息。
         """
         if len(desc) != 32:
             raise ValueError('board must have 32 cells')
@@ -99,6 +101,16 @@ class GameState:
         gs.captured_counts = {'R': 0, 'B': 0}
         gs.moves_since_capture = 0
         used = {'R': dict(PIECE_COUNT), 'B': dict(PIECE_COUNT)}
+        if removed:
+            for s in removed:
+                if not (isinstance(s, str) and len(s) >= 3 and s[1] == ':'):
+                    raise ValueError(f'bad removed piece: {s}')
+                color, ptype = s[0], s[2]
+                if color not in ('R', 'B') or ptype not in TYPE_ORDER:
+                    raise ValueError(f'bad removed piece: {s}')
+                if used[color][ptype] <= 0:
+                    raise ValueError(f'removed piece not on board: {s}')
+                used[color][ptype] -= 1
         hidden = []
         for i, s in enumerate(desc):
             if s is None or s == '' or s == '.':

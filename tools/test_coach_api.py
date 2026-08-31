@@ -77,4 +77,12 @@ test('棋子超配(3个红将)', {'board': (['R:J'] * 3) + (['.'] * 29), 'turn':
 test('非法棋子类型', {'board': (['R:Z'] * 1) + (['.'] * 31), 'turn': 'R'}, False)
 test('非法turn', {'board': ['.'] * 32, 'turn': 'X'}, False)
 
+# 用例F: removed(已吃棋子)校验
+board = ['.'] * 32
+board[0] = 'R:J'
+test('removed正常(黑将已吃)', {'board': board, 'turn': 'R', 'removed': ['B:J']}, True)
+test('removed超配(2个黑将)', {'board': board, 'turn': 'R', 'removed': ['B:J', 'B:J']}, False)
+test('removed非法类型', {'board': board, 'turn': 'R', 'removed': ['B:Z']}, False)
+test('removed非列表', {'board': board, 'turn': 'R', 'removed': 'B:J'}, False)
+
 print('\n全部通过 [OK]')
