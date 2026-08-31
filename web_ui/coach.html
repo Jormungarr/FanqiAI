@@ -1,0 +1,293 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Fanqi 指导模式</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;margin:16px}
+    .board{display:grid;grid-template-columns:repeat(4,56px);gap:6px;margin-top:12px}
+    .cell{width:56px;height:56px;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;font-weight:700;user-select:none;cursor:pointer;font-size:15px}
+    .R{background:#ffecec;color:#900}
+    .B{background:#ecf0ff;color:#034}
+    .empty{background:#fafafa;border-color:#eee}
+    .hidden{background:#444;color:#888;border-color:#555}
+    .xray .hidden{background:#3a3a3a;color:#9cf;border-color:#666;font-size:13px}
+    .sel{box-shadow:0 0 0 2px #08f}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .status{margin:10px 0;font-weight:600;font-size:15px}
+    .layout{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
+    .side{width:360px}
+    .panel{border:1px solid #ddd;border-radius:8px;padding:10px;margin-bottom:12px;background:#fafafa}
+    .adv-item{padding:6px 8px;margin:3px 0;border:1px solid #ddd;border-radius:6px;cursor:pointer;background:#fff;font-size:13px}
+    .adv-item:hover{border-color:#4a9;background:#eefaf3}
+    .adv-top{border-color:#c90;background:#fff7e0;font-weight:600}
+    .hint{font-size:12px;color:#777;margin-top:4px}
+  </style>
+</head>
+<body>
+  <h2>Fanqi 指导模式 <a href="play.html" style="font-size:14px">人机对战 →</a> <a href="index.html" style="font-size:14px">回放 →</a></h2>
+  <div class="controls">
+    <button id="randomBtn">🎲 随机开局</button>
+    <button id="clearBtn">清空</button>
+    <label>透视暗棋 <input id="xray" type="checkbox"></label>
+    <label>轮到 <select id="turnSel">
+      <option value="R">红方</option>
+      <option value="B">黑方</option>
+    </select></label>
+    <label>红余 <input id="scoreR" type="number" value="60" min="0" max="60" style="width:56px"></label>
+    <label>黑余 <input id="scoreB" type="number" value="60" min="0" max="60" style="width:56px"></label>
+    <label>种子 <input id="seed" type="text" placeholder="可选" style="width:70px"></label>
+    <button id="analyzeBtn">🎯 AI 分析</button>
+    <span id="info"></span>
+  </div>
+  <div class="layout">
+    <div>
+      <div id="status" class="status">点击格子摆子,或点「随机开局」生成完整对局</div>
+      <div id="board" class="board"></div>
+    </div>
+    <div class="side">
+      <div id="editor" class="panel"><b>格子编辑</b><br><span class="hint">点击棋盘上的格子后在此编辑</span></div>
+      <div id="result" class="panel"><b>AI 分析</b><br><span class="hint">编辑好局面后点「🎯 AI 分析」,AI 会给出下一步建议与胜率</span></div>
+    </div>
+  </div>
+
+  <script>
+    const boardEl = document.getElementById('board');
+    const infoEl = document.getElementById('info');
+    const statusEl = document.getElementById('status');
+    const editorEl = document.getElementById('editor');
+    const resultEl = document.getElementById('result');
+
+    // 格子状态: '.' 空 | 'R:J' 明棋 | 'R:J?' 暗棋(内容指定) | 'H' 暗棋(内容未知)
+    let cells = [];
+    let turn = 'R';
+    let selected = -1;
+    let analysis = null;   // {eval_win_rate, total, moves}
+    let history = [];      // 推演栈 [{cells, turn, scores}]
+    let busy = false;
+
+    const PIECE_CN = {
+      'RJ':'帅','RS':'仕','RX':'相','RR':'车','RN':'马','RC':'炮','RP':'兵',
+      'BJ':'将','BS':'士','BX':'象','BR':'车','BN':'马','BC':'炮','BP':'卒'
+    };
+    const COLOR_CN = {R:'红方', B:'黑方'};
+    // 棋子分值(吃子扣被吃方,误伤扣自己)
+    const VALUE = {J:30, S:10, X:5, R:5, N:5, C:5, P:2};
+    // 编辑器类型下拉: [值, 显示名]
+    const TYPE_OPTS = [['.', '空'], ['H', '暗棋·随机'],
+      ['R:J','红帅'],['R:S','红仕'],['R:X','红相'],['R:R','红车'],['R:N','红马'],['R:C','红炮'],['R:P','红兵'],
+      ['B:J','黑将'],['B:S','黑士'],['B:X','黑象'],['B:R','黑车'],['B:N','黑马'],['B:C','黑炮'],['B:P','黑卒']];
+
+    async function api(path, body){
+      const resp = await fetch(path, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body || {})
+      });
+      return resp.json();
+    }
+
+    function randSetup(){
+      // 标准 32 子随机摆放,翻开 4 个:内部保留全部内容,渲染时暗棋显示 ■
+      const pieces = [];
+      for(const c of ['R','B']){
+        for(const t of ['J','S','S','X','X','R','R','N','N','C','C','P','P','P','P','P']){
+          pieces.push(c + ':' + t);
+        }
+      }
+      for(let i = pieces.length - 1; i > 0; i--){
+        const j = Math.floor(Math.random() * (i + 1));
+        [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
+      }
+      const cells2 = pieces.map(p => p + '?');
+      const idxs = [...Array(32).keys()].sort(() => Math.random() - 0.5).slice(0, 4);
+      idxs.forEach(i => { cells2[i] = cells2[i].slice(0, 3); });
+      return cells2;
+    }
+
+    function scores(){ return {R: parseInt(document.getElementById('scoreR').value, 10) || 0,
+                               B: parseInt(document.getElementById('scoreB').value, 10) || 0}; }
+
+    function render(){
+      infoEl.textContent = '轮到 ' + COLOR_CN[turn] + ' | 红余:' + scores().R + ' 黑余:' + scores().B;
+      const xray = document.getElementById('xray').checked;
+      boardEl.className = 'board' + (xray ? ' xray' : '');
+      boardEl.innerHTML = '';
+      for(let i=0;i<32;i++){
+        const orig = (i%4)*8 + Math.floor(i/4);   // 纵向转置渲染
+        const d = document.createElement('div');
+        d.className = 'cell';
+        const c = cells[orig];
+        if(c === '.' || c === undefined){
+          d.classList.add('empty');
+          d.textContent = '';
+        } else if(c === 'H'){
+          d.classList.add('hidden');
+          d.textContent = xray ? '?' : '■';
+        } else if(c.endsWith('?')){
+          d.classList.add('hidden');
+          const parts = c.slice(0,3).split(':');
+          d.textContent = xray ? (parts[0] === 'R' ? '红' : '黑') + (PIECE_CN[parts[0]+parts[1]] || c) : '■';
+        } else {
+          const parts = c.split(':');
+          d.classList.add(parts[0]);
+          d.textContent = PIECE_CN[parts[0]+parts[1]] || c;
+        }
+        if(orig === selected) d.classList.add('sel');
+        d.addEventListener('click', () => selectCell(orig));
+        boardEl.appendChild(d);
+      }
+      renderEditor();
+      renderResult();
+    }
+
+    function selectCell(i){
+      if(busy) return;
+      selected = (selected === i) ? -1 : i;
+      render();
+    }
+
+    function renderEditor(){
+      if(selected < 0){ editorEl.innerHTML = '<b>格子编辑</b><br><span class="hint">点击棋盘上的格子后在此编辑</span>'; return; }
+      const cur = cells[selected] || '.';
+      const h = ['<b>格子编辑</b> — 第 ' + (selected+1) + ' 格(' + (Math.floor(selected/8)+1) + '行 ' + (selected%8+1) + '列)',
+        '<div style="margin:6px 0"><select id="typeSel">' + TYPE_OPTS.map(o =>
+          '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') +
+          '</select></div>',
+        '<label>明置 <input id="revSel" type="checkbox"' + (cur === '.' || cur === 'H' || !cur.endsWith('?') ? ' checked' : '') + '></label> ',
+        '<button id="applyBtn">应用</button>',
+        '<span class="hint">勾选明置=明棋,取消=暗棋(暗棋内容仅AI可见,棋盘显示 ■)</span>'
+      ].join('');
+      editorEl.innerHTML = h;
+      document.getElementById('applyBtn').onclick = applyCell;
+    }
+
+    function applyCell(){
+      const t = document.getElementById('typeSel').value;
+      const rev = document.getElementById('revSel').checked;
+      if(t === '.' || t === 'H'){ cells[selected] = t; }
+      else { cells[selected] = rev ? t : (t + '?'); }
+      analysis = null;
+      render();
+    }
+
+    async function analyze(){
+      if(busy) return;
+      busy = true;
+      statusEl.textContent = 'AI 分析中…(约 2~3 秒)';
+      document.getElementById('analyzeBtn').disabled = true;
+      const seed = document.getElementById('seed').value.trim() || null;
+      const r = await api('/api/coach/analyze', {
+        board: cells, turn: turn, scores: scores(), seed: seed, time_budget: 2.5
+      });
+      busy = false;
+      document.getElementById('analyzeBtn').disabled = false;
+      if(r.error){ alert(r.error); analysis = null; statusEl.textContent = '分析失败:' + r.error; }
+      else { analysis = r; statusEl.textContent = '分析完成(' + r.total + ' 次模拟)'; }
+      render();
+    }
+
+    function renderResult(){
+      const histHtml = history.length
+        ? '<div style="margin-top:8px"><button id="undoBtn">↩ 撤销推演(已推演 ' + history.length + ' 步)</button></div>'
+        : '';
+      let html;
+      if(!analysis){
+        html = '<b>AI 分析</b><div class="hint">编辑好局面后点「🎯 AI 分析」,AI 会给出下一步建议与胜率</div>' + histHtml;
+      } else {
+        const a = analysis;
+        const evalLine = a.eval_win_rate == null
+          ? '<div><b>该局面已终局,无合法动作</b></div>'
+          : '<div>当前局面:' + COLOR_CN[a.turn] + '胜率 <b>' + (a.eval_win_rate*100).toFixed(1) + '%</b> (总模拟 ' + a.total + ' 次)</div>';
+        const list = a.moves.length ? a.moves.map((m,i) =>
+          '<div class="adv-item' + (i===0?' adv-top':'') + '" data-i="' + i + '">' +
+          (i===0?'⭐ 推荐 ':'') + (i+1) + '. ' + m.text + ' — 胜率 ' + (m.win_rate*100).toFixed(1) +
+          '% (' + m.visits + '次模拟)</div>').join('') : '<div class="hint">无候选动作</div>';
+        html = '<b>AI 分析</b>' + evalLine + list + histHtml +
+          '<div class="hint">点击动作可推演一步(可连续分析多步),支持撤销</div>';
+      }
+      resultEl.innerHTML = html;
+      resultEl.querySelectorAll('.adv-item').forEach(d => {
+        d.onclick = () => {
+          const m = analysis.moves[parseInt(d.dataset.i, 10)];
+          if(m && !busy) applyAction(m.action, m.text);
+        };
+      });
+      const ub = document.getElementById('undoBtn');
+      if(ub) ub.onclick = undoStep;
+    }
+
+    // —— 本地推演(与引擎规则一致:吃子扣分/炮击移炮/翻棋) ——
+    function applyAction(action, text){
+      const src = action[1], dst = action[2];
+      const t0 = action[0];
+      const snap = {cells: cells.slice(), turn: turn, scores: scores()};
+      if(t0 === 'flip'){
+        if(cells[src] === 'H'){ alert('目标暗棋内容未知,无法推演(请给暗棋指定内容或重新分析)'); return; }
+        cells[src] = cells[src].slice(0, 3);
+      } else {
+        const mover = cells[src];
+        if(mover === undefined){ alert('异常:源格为空'); return; }
+        const tgt = cells[dst];
+        if(tgt === 'H'){ alert('目标暗棋内容未知,无法推演(请给暗棋指定内容或重新分析)'); return; }
+        if(tgt !== undefined && tgt !== '.'){
+          // 吃子/炮击结算:吃对方扣对方分;炮击误伤己方暗棋扣自己分
+          const tv = VALUE[tgt[2]];
+          const tm = tgt[0];
+          if(t0 === 'cannon' && tm === mover[0] && !tgt.endsWith('?')){
+            alert('目标为己方明棋,非合法动作'); return;
+          }
+          if(t0 === 'move' && tm === mover[0]){
+            alert('目标为己方棋子,非合法动作'); return;
+          }
+          const sc = scores();
+          if(tm === mover[0]){
+            sc[mover[0]] -= tv;   // 炮击误伤己方暗棋:扣自己
+          } else {
+            sc[tm] -= tv;         // 吃子/炮击对方:扣对方
+          }
+          updateScores(sc);
+        }
+        cells[dst] = mover;
+        cells[src] = '.';
+      }
+      history.push(snap);
+      turn = (turn === 'R') ? 'B' : 'R';
+      analysis = null;
+      selected = -1;
+      render();
+    }
+
+    function updateScores(sc){
+      document.getElementById('scoreR').value = sc.R;
+      document.getElementById('scoreB').value = sc.B;
+    }
+
+    function undoStep(){
+      if(!history.length) return;
+      const s = history.pop();
+      cells = s.cells;
+      turn = s.turn;
+      updateScores(s.scores);
+      analysis = null;
+      selected = -1;
+      render();
+    }
+
+    document.getElementById('randomBtn').onclick = () => {
+      cells = randSetup(); turn = 'R'; history = []; analysis = null; selected = -1;
+      updateScores({R:60, B:60});
+      document.getElementById('seed').value = '';
+      render();
+    };
+    document.getElementById('clearBtn').onclick = () => {
+      cells = Array(32).fill('.'); history = []; analysis = null; selected = -1; render();
+    };
+    document.getElementById('xray').onchange = render;
+    document.getElementById('turnSel').onchange = () => { turn = document.getElementById('turnSel').value; analysis = null; render(); };
+    document.getElementById('analyzeBtn').onclick = analyze;
+
+    cells = randSetup();
+    render();
+  </script>
+</body>
+</html>

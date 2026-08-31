@@ -19,6 +19,7 @@
 | `ai_mcts.py` | **MCTS 强 AI**:UCT 树搜索 + 吃子优先 rollout,输出每个动作的模拟胜率 |
 | `game_server.py` | 人机对战 HTTP 服务器(线程安全,单会话) |
 | `web_ui/play.html` | 对战页面:翻子/选子/走子/炮击交互、历史记录、💡 决策建议 |
+| `web_ui/coach.html` | **指导模式**:自定义局面编辑器 + AI 下一步建议与胜率、动作推演 |
 | `web_ui/index.html` | 静态回放查看器 |
 | `simulator.py` | 终端 CLI:自我对弈、实时演示、回放保存/加载/HTML 导出 |
 | `tools/` | 验证与训练脚本(见下) |
@@ -29,6 +30,19 @@
 # 人机对战(浏览器打开 http://localhost:8000/web_ui/play.html)
 python game_server.py --port 8000
 
+# 指导模式(编辑任意局面,AI 推荐下一步并给出胜率)
+# 浏览器打开 http://localhost:8000/web_ui/coach.html
+```
+
+### 指导模式(教练)操作
+
+- **🎲 随机开局**:生成完整 32 子随机局(与真实对局一致,暗棋显示 ■,可开「透视」查看内容)
+- 点击格子 → 右侧面板编辑:置为明棋/暗棋(内容由你指定,上帝视角)或「暗棋·随机」
+- 指定「轮到」红/黑与剩余分数(残局练习)
+- **🎯 AI 分析**:MCTS 搜索后给出当前局面胜率 + 每个候选动作的胜率与模拟次数,⭐ 推荐置顶
+- 点击候选动作可在棋盘上推演一步,支持连续分析多步与撤销;输入相同「种子」可复现同一局面分析
+
+```bash
 # 终端自我对弈(规则回归验证)
 python simulator.py --games 10 --seed 42
 
@@ -87,7 +101,7 @@ fanqi/
 ├── simulator.py       # 终端模拟器/回放
 ├── replay.py          # HTML 回放导出
 ├── rules.md           # 完整规则文档
-├── web_ui/            # 网页对战 + 回放查看器
+├── web_ui/            # 网页对战 + 指导模式 + 回放查看器
 ├── tools/             # 验证/训练/诊断脚本
 └── replay_samples/    # 回放示例
 ```
@@ -96,6 +110,7 @@ fanqi/
 
 - `tools/verify_cannon.py`:炮击盲狙、误伤自罚、炮跟进落位、将帅禁食兵卒、炮仅炮击、同级相吃 6 大场景 + 50 局随机回归(0 非法动作)
 - `tools/smoke_test_api.py`:对战 API 全链路冒烟(新对局/翻子/AI 回应/合法走法/非法拦截/决策建议)
+- `tools/test_coach_api.py`:指导模式接口测试(必赢残局/完整随机局/H 暗棋种子复现/非法输入拦截)
 - `tools/diag_mcts.py`:MCTS 单步正确性(必赢局面必选对)
 
 ## 参考

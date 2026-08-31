@@ -14,6 +14,9 @@ VALUE = {
 
 TYPE_ORDER = ['J', 'S', 'X', 'R', 'N', 'C', 'P']
 
+# 每方标准棋子数量(用于 from_setup 的暗棋随机补全)
+PIECE_COUNT = {'J': 1, 'S': 2, 'X': 2, 'R': 2, 'N': 2, 'C': 2, 'P': 5}
+
 
 class Piece:
     def __init__(self, ptype: str, color: str):
@@ -75,6 +78,59 @@ class GameState:
         self.rng.shuffle(hidden_indices)
         for idx in hidden_indices[:4]:
             self.board[idx].revealed = True
+
+    @classmethod
+    def from_setup(cls, desc, scores=None, seed=None):
+        """从局面描述构造任意局面(供指导/残局练习)。
+
+        desc: 长度 32 的列表,每格取值:
+          '.' / None / ''  -> 空格
+          'R:J'           -> 明棋
+          'R:J?'          -> 暗棋(内容指定,上帝视角)
+          'H'             -> 暗棋(内容未指定,从剩余标准棋子随机分配)
+        scores: 剩余分数,默认双方 60。
+        """
+        if len(desc) != 32:
+            raise ValueError('board must have 32 cells')
+        gs = cls.__new__(cls)
+        gs.rng = random.Random(seed)
+        gs.board = [None] * 32
+        gs.scores = {'R': 60, 'B': 60} if scores is None else dict(scores)
+        gs.captured_counts = {'R': 0, 'B': 0}
+        gs.moves_since_capture = 0
+        used = {'R': dict(PIECE_COUNT), 'B': dict(PIECE_COUNT)}
+        hidden = []
+        for i, s in enumerate(desc):
+            if s is None or s == '' or s == '.':
+                continue
+            if s == 'H':
+                hidden.append(i)
+                continue
+            if isinstance(s, str) and len(s) >= 3 and s[1] == ':':
+                color, ptype = s[0], s[2]
+                if color not in ('R', 'B') or ptype not in TYPE_ORDER:
+                    raise ValueError(f'bad cell {i}: {s}')
+                if used[color][ptype] <= 0:
+                    raise ValueError(f'too many {color}{ptype} (cell {i})')
+                used[color][ptype] -= 1
+                p = Piece(ptype, color)
+                p.revealed = not s.endswith('?')
+                gs.board[i] = p
+            else:
+                raise ValueError(f'bad cell {i}: {s}')
+        # 未指定内容的暗棋:从标准配置的剩余棋子中随机分配
+        remaining = []
+        for color in ('R', 'B'):
+            for t, n in used[color].items():
+                remaining += [Piece(t, color) for _ in range(n)]
+        gs.rng.shuffle(remaining)
+        for idx in hidden:
+            if remaining:
+                gs.board[idx] = remaining.pop()
+            else:
+                # 棋子已超配(理论上被前面校验拦住),随机补一个保证有内容
+                gs.board[idx] = Piece(gs.rng.choice(TYPE_ORDER), gs.rng.choice(('R', 'B')))
+        return gs
 
     def in_bounds(self, r: int, c: int) -> bool:
         return 0 <= r < self.ROWS and 0 <= c < self.COLS

@@ -265,6 +265,49 @@ class Handler(BaseHTTPRequestHandler):
                 for m in info['moves']
             ]
             self._send_json({'ok': True, 'moves': moves, 'total': info['total']})
+        elif path == '/api/coach/analyze':
+            # 指导模式:对任意编辑局面做 MCTS 搜索,输出局面胜率与每个动作的胜率
+            board = body.get('board')
+            if not isinstance(board, list) or len(board) != 32:
+                self._send_json({'error': 'board must be a 32-cell list'}, 400)
+                return
+            turn = body.get('turn', 'R')
+            if turn not in ('R', 'B'):
+                self._send_json({'error': 'bad turn'}, 400)
+                return
+            scores = body.get('scores')
+            if scores is not None and (not isinstance(scores, dict)
+                                       or 'R' not in scores or 'B' not in scores):
+                self._send_json({'error': 'bad scores'}, 400)
+                return
+            seed = body.get('seed')
+            try:
+                time_budget = float(body.get('time_budget', 2.5))
+            except (TypeError, ValueError):
+                time_budget = 2.5
+            try:
+                game = GameState.from_setup(board, scores=scores, seed=seed)
+            except ValueError as e:
+                self._send_json({'error': str(e)}, 400)
+                return
+            acts = game.get_legal_actions(turn)
+            if not acts:
+                self._send_json({'ok': True, 'turn': turn, 'eval_win_rate': None,
+                                 'total': 0, 'moves': [],
+                                 'note': '该局面无合法动作(已终局)'})
+                return
+            info = evaluate_moves(game, turn, time_budget=time_budget)
+            moves = [
+                {'action': m['action'],
+                 'text': action_text(m['action'], turn),
+                 'win_rate': round(m['win_rate'], 4),
+                 'visits': m['visits']}
+                for m in info['moves']
+            ]
+            self._send_json({'ok': True, 'turn': turn,
+                             'eval_win_rate': round(info['turn_win_rate'], 4)
+                             if info['turn_win_rate'] is not None else None,
+                             'total': info['total'], 'moves': moves})
         else:
             self._send_json({'error': 'not found'}, 404)
 

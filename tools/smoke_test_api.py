@@ -23,25 +23,34 @@ assert s['human_color'] in ('R', 'B'), 'human color'
 assert s['turn'] in ('R', 'B'), 'turn'
 print(f"new: human={s['human_color']} turn={s['turn']} over={s['over']} history={len(s['history'])}")
 
-# 找第一个暗棋翻
-idx = next(i for i, c in enumerate(s['board']) if c == 'H')
-m = call('/api/move', {'action': ['flip', idx]})
-assert not m['over'], 'game should continue'
-assert m['turn'] == m['human_color'], 'turn back to human after AI reply'
-assert len(m['history']) >= 2, 'player + AI steps recorded'
-print('move: flip', idx)
-for h in m['history']:
-    print('  step:', h['text'], '|', h['reason'])
+# 连续翻子直到玩家拥有明棋(最多 8 次),AI 会每次回应
+src = None
+flip_steps = []
+m = s
+for attempt in range(8):
+    hidden = [i for i, c in enumerate(m['board']) if c == 'H']
+    assert hidden, 'no hidden piece left'
+    idx = hidden[0]
+    m = call('/api/move', {'action': ['flip', idx]})
+    assert not m['over'], 'game should continue'
+    assert m['turn'] == m['human_color'], 'turn back to human after AI reply'
+    assert len(m['history']) >= 2, 'player + AI steps recorded'
+    print('move: flip', idx)
+    for h in m['history']:
+        print('  step:', h['text'], '|', h['reason'])
+    flip_steps = [h for h in m['history'] if h['action'] and h['action'][0] == 'flip']
+    src = next((i for i, c in enumerate(m['board'])
+                if isinstance(c, str) and c.startswith(m['human_color'] + ':')), None)
+    if src is not None:
+        break
 
 # 每次翻棋都应记录翻出的棋子
-flip_steps = [h for h in m['history'] if h['action'] and h['action'][0] == 'flip']
 assert flip_steps, 'should have flip steps'
 assert all(h.get('revealed') for h in flip_steps), 'every flip must record revealed piece'
 print('flip reveal record OK:', [h['revealed'] for h in flip_steps])
 
 # 玩家己方明棋的合法走法
-src = next(i for i, c in enumerate(m['board'])
-           if isinstance(c, str) and c.startswith(m['human_color'] + ':'))
+assert src is not None, 'human should have a revealed piece'
 l = call('/api/legal', {'src': src})
 print(f"legal for src={src}: {len(l['moves'])} moves ->", l['moves'][:5])
 assert l['ok'] is True
@@ -50,7 +59,6 @@ assert l['ok'] is True
 bad = call('/api/move', {'action': ['flip', idx]})
 assert 'error' in bad, 'should reject invalid flip'
 print('invalid move guard OK:', bad['error'])
-
 # 决策建议接口(仅玩家回合可调)
 if m['turn'] == m['human_color']:
     adv = call('/api/advise', {})

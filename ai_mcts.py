@@ -152,7 +152,9 @@ def evaluate_moves(state: GameState, color: str, time_budget: float = 2.0,
                           'win_rate': 1.0 - opp_rate,
                           'visits': ch.visits})
     moves.sort(key=lambda m: -m['win_rate'])
-    return {'moves': moves, 'total': root.visits}
+    # turn_win_rate: 根节点视角,即「当前轮到 color 行动时 color 的胜率」
+    return {'moves': moves, 'total': root.visits,
+            'turn_win_rate': root.wins / root.visits if root.visits else None}
 
 
 class MCTSAgent:
