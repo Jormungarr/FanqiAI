@@ -17,6 +17,9 @@ TYPE_ORDER = ['J', 'S', 'X', 'R', 'N', 'C', 'P']
 # 每方标准棋子数量(用于 from_setup 的暗棋随机补全)
 PIECE_COUNT = {'J': 1, 'S': 2, 'X': 2, 'R': 2, 'N': 2, 'C': 2, 'P': 5}
 
+# 棋子中文名(用于错误提示)
+TYPE_CN = {'J': '将/帅', 'S': '仕/士', 'X': '相/象', 'R': '车', 'N': '马', 'C': '炮', 'P': '兵/卒'}
+
 
 class Piece:
     def __init__(self, ptype: str, color: str):
@@ -109,7 +112,10 @@ class GameState:
                 if color not in ('R', 'B') or ptype not in TYPE_ORDER:
                     raise ValueError(f'bad removed piece: {s}')
                 if used[color][ptype] <= 0:
-                    raise ValueError(f'removed piece not on board: {s}')
+                    raise ValueError(
+                        f'removed piece not on board: {s}: '
+                        f'已吃登记超出标准配置(每方 {PIECE_COUNT[ptype]} 个 {ptype}),'
+                        '或该棋子仍摆在棋盘上')
                 used[color][ptype] -= 1
         hidden = []
         for i, s in enumerate(desc):
@@ -123,7 +129,10 @@ class GameState:
                 if color not in ('R', 'B') or ptype not in TYPE_ORDER:
                     raise ValueError(f'bad cell {i}: {s}')
                 if used[color][ptype] <= 0:
-                    raise ValueError(f'too many {color}{ptype} (cell {i})')
+                    raise ValueError(
+                        f'too many {color}{ptype} (cell {i}): '
+                        f'{color} 的 {TYPE_CN[ptype]}标准最多 {PIECE_COUNT[ptype]} 个,'
+                        '已全部在棋盘上,请检查该格是否误录,或确认「已吃」登记未与棋盘冲突')
                 used[color][ptype] -= 1
                 p = Piece(ptype, color)
                 p.revealed = not s.endswith('?')

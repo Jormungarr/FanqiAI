@@ -17,9 +17,11 @@ def post(path, body):
         return e.code, json.loads(e.read().decode())
 
 
-def test(name, body, expect_ok=True):
+def test(name, body, expect_ok=True, expect_err=None):
     status, r = post('/api/coach/analyze', body)
     ok = (r.get('ok', False) is True) == expect_ok
+    if expect_err:
+        ok = ok and expect_err in r.get('error', '')
     print('%s %s: status=%d ok=%s' % ('PASS' if ok else 'FAIL', name, status, r.get('ok')))
     if not ok:
         print('   response:', json.dumps(r, ensure_ascii=False)[:300])
@@ -73,7 +75,10 @@ print('   note:', r['note'])
 
 # 用例E: 非法输入
 test('board长度错误', {'board': ['.'] * 31, 'turn': 'R'}, False)
-test('棋子超配(3个红将)', {'board': (['R:J'] * 3) + (['.'] * 29), 'turn': 'R'}, False)
+test('棋子超配(3个红将)', {'board': (['R:J'] * 3) + (['.'] * 29), 'turn': 'R'}, False,
+     expect_err='cell 1')
+test('棋子超配(6个红兵)', {'board': (['R:P'] * 6) + (['.'] * 26), 'turn': 'R'}, False,
+     expect_err='cell 5')
 test('非法棋子类型', {'board': (['R:Z'] * 1) + (['.'] * 31), 'turn': 'R'}, False)
 test('非法turn', {'board': ['.'] * 32, 'turn': 'X'}, False)
 

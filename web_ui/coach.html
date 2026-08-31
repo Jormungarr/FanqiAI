@@ -14,6 +14,7 @@
     .hidden{background:#444;color:#888;border-color:#555}
     .xray .hidden{background:#3a3a3a;color:#9cf;border-color:#666;font-size:13px}
     .sel{box-shadow:0 0 0 2px #08f}
+    .badcell{box-shadow:0 0 0 2px #f00}
     .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .status{margin:10px 0;font-weight:600;font-size:15px}
     .layout{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
@@ -82,6 +83,7 @@
     let selected = -1;
     let analysis = null;   // {eval_win_rate, total, moves}
     let history = [];      // 推演栈 [{cells, turn, scores}]
+    let badCell = -1;      // 分析报错时高亮的冲突格子
     let busy = false;
 
     const PIECE_CN = {
@@ -153,6 +155,7 @@
         // 坐标角标:真实棋盘坐标 行,列
         d.innerHTML = '<span class="coord">' + Math.floor(orig/8) + ',' + (orig%8) + '</span>' + content;
         if(orig === selected) d.classList.add('sel');
+        if(orig === badCell) d.classList.add('badcell');
         d.addEventListener('click', () => selectCell(orig));
         boardEl.appendChild(d);
       }
@@ -163,6 +166,7 @@
     function selectCell(i){
       if(busy) return;
       selected = (selected === i) ? -1 : i;
+      badCell = -1;
       render();
     }
 
@@ -203,8 +207,19 @@
       });
       busy = false;
       document.getElementById('analyzeBtn').disabled = false;
-      if(r.error){ alert(r.error); analysis = null; statusEl.textContent = '分析失败:' + r.error; }
-      else { analysis = r; statusEl.textContent = '分析完成(' + r.total + ' 次模拟)'; }
+      if(r.error){
+        alert(r.error);
+        analysis = null;
+        statusEl.textContent = '分析失败:' + r.error;
+        // 报错若指向具体格子,高亮定位冲突位置
+        const cm = r.error.match(/cell (\d+)/);
+        badCell = cm ? parseInt(cm[1], 10) : -1;
+        render();
+        return;
+      }
+      analysis = r;
+      badCell = -1;
+      statusEl.textContent = '分析完成(' + r.total + ' 次模拟)';
       render();
     }
 
@@ -306,7 +321,9 @@
 
     function exportText(){
       // 公开视角导出:暗棋统一导出为 H(内容未知),明棋 R:J
-      const lines = ['# Fanqi 局面 | 轮到:' + COLOR_CN[turn] + ' | 红余:' + scores().R + ' 黑余:' + scores().B];
+      const removed = document.getElementById('removed').value.split(/[,，\s]+/).map(s=>s.trim()).filter(Boolean);
+      const lines = ['# Fanqi 局面 | 轮到:' + COLOR_CN[turn] + ' | 红余:' + scores().R + ' 黑余:' + scores().B +
+        (removed.length ? ' | 已吃:' + removed.join(',') : '')];
       for(let i=0;i<32;i++){
         const c = cells[i];
         if(c === undefined || c === '.') continue;
@@ -354,6 +371,8 @@
           if(t){ turn = (t[1] === '红方') ? 'R' : 'B'; document.getElementById('turnSel').value = turn; }
           const s = line.match(/红余:(\d+)\s+黑余:(\d+)/);
           if(s) updateScores({R: parseInt(s[1],10), B: parseInt(s[2],10)});
+          const rm = line.match(/已吃:([^|]+)/);
+          if(rm) document.getElementById('removed').value = rm[1].trim();
         }
         history = []; analysis = null; selected = -1;
         closeImport();
