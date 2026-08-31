@@ -1,0 +1,819 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Fanqi 对战 · 指导</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;margin:16px}
+    .tabs{display:flex;gap:8px;margin:10px 0}
+    .tab{padding:6px 18px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:14px}
+    .tab.active{background:#08f;color:#fff;border-color:#08f}
+    .board{display:grid;grid-template-columns:repeat(8,56px);gap:6px;margin-top:12px}
+    #cBoard{grid-template-columns:repeat(4,56px)}
+    .cell{width:56px;height:56px;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;font-weight:700;user-select:none;font-size:15px;position:relative}
+    #cBoard .cell{cursor:pointer}
+    .coord{position:absolute;top:1px;left:3px;font-size:9px;color:#999;font-weight:400}
+    .R{background:#ffecec;color:#900}
+    .B{background:#ecf0ff;color:#034}
+    .empty{background:#fafafa;border-color:#eee}
+    .hidden{background:#444;color:#888;border-color:#555}
+    .clickable{cursor:pointer}
+    .mine{cursor:pointer;box-shadow:0 0 0 2px #4a9}
+    .target{cursor:pointer;background:#ffe9a8 !important;border-color:#c90 !important}
+    .attack{cursor:pointer;background:#ffb3b3 !important;border-color:#c00 !important}
+    .sel{box-shadow:0 0 0 2px #08f}
+    .badcell{box-shadow:0 0 0 2px #f00}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .status{margin:10px 0;font-weight:600;font-size:15px}
+    .advice{margin-top:10px;font-size:13px}
+    .adv-item{padding:6px 8px;margin:3px 0;border:1px solid #ddd;border-radius:6px;cursor:pointer;background:#fff;font-size:13px}
+    .adv-item:hover{border-color:#4a9;background:#eefaf3}
+    .adv-top{border-color:#c90;background:#fff7e0;font-weight:600}
+    .log{margin-top:12px;font-family:monospace;font-size:13px;background:#f7f7f7;padding:8px;border:1px solid #eee;max-height:260px;overflow:auto;white-space:pre-wrap}
+    .layout{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
+    .side{width:360px}
+    .panel{border:1px solid #ddd;border-radius:8px;padding:10px;margin-bottom:12px;background:#fafafa}
+    .hint{font-size:12px;color:#777;margin-top:4px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:10}
+    .modal-box{background:#fff;border-radius:8px;padding:14px;width:420px;max-width:92vw}
+    .modal-box textarea{width:100%;box-sizing:border-box;margin:8px 0;font-family:monospace;font-size:12px}
+  </style>
+</head>
+<body>
+  <h2>Fanqi 对战 · 指导 <a href="index.html" style="font-size:14px">回放查看器 →</a></h2>
+  <div class="tabs">
+    <button id="tabPlay" class="tab active">⚔ 对战</button>
+    <button id="tabCoach" class="tab">🎯 指导</button>
+  </div>
+
+  <!-- ===== 对战面板 ===== -->
+  <div id="playPane">
+    <div class="controls">
+      <button id="newGame">新对局</button>
+      <select id="agentSel">
+        <option value="mcts">AI: MCTS(强)</option>
+        <option value="prefer">AI: 偏好策略</option>
+        <option value="random">AI: 随机</option>
+      </select>
+      <label>纵向 <input id="vertical" type="checkbox" checked></label>
+      <button id="adviseBtn">💡 建议</button>
+      <button id="toCoachBtn" title="把当前对局(含已吃历史)送入指导模式深度分析">🔀 送指导分析</button>
+      <span id="pInfo"></span>
+    </div>
+    <div id="pStatus" class="status">加载中…</div>
+    <div id="pBoard" class="board"></div>
+    <div id="pAdvice" class="advice"></div>
+    <div id="pLog" class="log"></div>
+  </div>
+
+  <!-- ===== 指导面板 ===== -->
+  <div id="coachPane" style="display:none">
+    <div class="controls">
+      <button id="randomBtn">🎲 随机开局</button>
+      <button id="fillBtn">⬛ 填满暗棋</button>
+      <button id="clearBtn">清空</button>
+      <button id="importBtn">📋 导入</button>
+      <button id="exportBtn">📤 导出</button>
+      <label>轮到 <select id="turnSel">
+        <option value="R">红方</option>
+        <option value="B">黑方</option>
+      </select></label>
+      <label>红余 <input id="scoreR" type="number" value="60" min="0" max="60" style="width:56px"></label>
+      <label>黑余 <input id="scoreB" type="number" value="60" min="0" max="60" style="width:56px"></label>
+      <label>已吃 <input id="removed" type="text" placeholder="如 B:J,R:P" style="width:90px" title="已被吃掉的棋子(公开信息),逗号分隔,用于暗棋随机分配"></label>
+      <button id="removedBtn" title="可视化登记已吃棋子(历史)">🗑 已吃</button>
+      <label>种子 <input id="seed" type="text" placeholder="可选" style="width:70px"></label>
+      <button id="analyzeBtn">🎯 AI 分析</button>
+      <label>执 <select id="fhSel" title="开新对局时你执哪方">
+        <option value="R">红</option>
+        <option value="B">黑</option>
+      </select></label>
+      <button id="startGameBtn" title="用当前局面开新对战(已吃历史带入,AI 从该局面继续)">▶ 开新对局</button>
+      <button id="backPlayBtn" title="丢弃指导模式改动,回到对局">↩ 回到对局</button>
+      <span id="cInfo"></span>
+    </div>
+    <div class="hint" style="margin-top:6px">进入本页自动载入当前对局(快照);也可手动编辑任意局面:先「填满暗棋」再摆明棋,或「导入」文本(<b>类型@行,列</b>,如 R:J@0,0 / H@2,3)。<b>暗棋内容对所有人未知(含 AI)</b>:AI 从「标准配置 − 明棋 − 已吃」的剩余棋子中随机分配。「▶ 开新对局」把此局面提交为对战继续。</div>
+    <div class="layout">
+      <div>
+        <div id="cStatus" class="status">点击格子摆子,或点「随机开局」生成完整对局</div>
+        <div id="cBoard" class="board"></div>
+      </div>
+      <div class="side">
+        <div id="cEditor" class="panel"><b>格子编辑</b><br><span class="hint">点击棋盘上的格子后在此编辑</span></div>
+        <div id="cResult" class="panel"><b>AI 分析</b><br><span class="hint">编辑好局面后点「🎯 AI 分析」,AI 会给出下一步建议与胜率</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal" class="modal" style="display:none">
+    <div class="modal-box">
+      <b>📋 导入局面文本</b>
+      <div class="hint">一行一子,格式 <b>类型@行,列</b>:明棋 R:J@0,0 · 暗棋 H@2,3(内容未知)或 R:J?@1,5(指定内容);# 开头为注释;可粘贴「导出」的内容</div>
+      <textarea id="importText" rows="10"></textarea>
+      <div><button id="importOk">导入</button> <button id="importCancel">取消</button></div>
+    </div>
+  </div>
+
+  <div id="rmModal" class="modal" style="display:none">
+    <div class="modal-box">
+      <b>🗑 已吃棋子登记(本局历史)</b>
+      <div class="hint">被吃掉的子是全公开历史,AI 分配暗棋时会自动排除已吃子(标准配置 − 盘面明棋 − 已吃)。每种子可登记数自动限制在「上限 = 标准 − 盘上明棋」内,不会超配。</div>
+      <div id="rmBody" style="display:flex;gap:28px;margin:8px 0"></div>
+      <div id="rmPreview" class="hint"></div>
+      <div style="margin-top:8px"><button id="rmOk">确定</button> <button id="rmClear">清空</button> <button id="rmCancel">取消</button></div>
+    </div>
+  </div>
+
+  <script>
+    // ===== 公共工具 =====
+    const PIECE_CN = {
+      'RJ':'帅','RS':'仕','RX':'相','RR':'车','RN':'马','RC':'炮','RP':'兵',
+      'BJ':'将','BS':'士','BX':'象','BR':'车','BN':'马','BC':'炮','BP':'卒'
+    };
+    const COLOR_CN = {R:'红方', B:'黑方'};
+    const VALUE = {J:30, S:10, X:5, R:5, N:5, C:5, P:2};
+    const TYPE_ORDER = ['J','S','X','R','N','C','P'];
+    const PIECE_COUNT = {'J':1,'S':2,'X':2,'R':2,'N':2,'C':2,'P':5};
+
+    async function api(path, body){
+      const resp = await fetch(path, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body || {})
+      });
+      return resp.json();
+    }
+
+    let _playLoad = null;    // 对战侧加载状态(供指导侧开新对局后回调)
+    let _playRefresh = null; // 对战侧重新拉取服务器状态
+    let _coachRefresh = null;// 指导侧从对局快照同步
+
+    function switchTab(which){
+      document.getElementById('playPane').style.display = which === 'play' ? '' : 'none';
+      document.getElementById('coachPane').style.display = which === 'coach' ? '' : 'none';
+      document.getElementById('tabPlay').classList.toggle('active', which === 'play');
+      document.getElementById('tabCoach').classList.toggle('active', which === 'coach');
+      if(which === 'play' && _playRefresh) _playRefresh();
+      if(which === 'coach' && _coachRefresh) _coachRefresh();
+    }
+
+    // ================= 对战逻辑 =================
+    (function(){
+      const boardEl = document.getElementById('pBoard');
+      const infoEl = document.getElementById('pInfo');
+      const statusEl = document.getElementById('pStatus');
+      const logEl = document.getElementById('pLog');
+
+      let S = null;          // 服务器返回的当前对局状态
+      let selected = -1;     // 选中的己方棋子索引
+      let legalMoves = [];   // 选中棋子的合法走法 [{dst,type}]
+      let advice = null;     // 建议列表 [{action,text,win_rate,visits}]
+      let busy = false;      // 请求进行中,禁止点击
+
+      async function newGame(){
+        busy = true; selected = -1; legalMoves = []; advice = null;
+        S = await api('/api/new', {agent: document.getElementById('agentSel').value});
+        busy = false;
+        render();
+      }
+
+      function myTurn(){ return !S.over && S.turn === S.human_color; }
+
+      function isHidden(i){ return S.board[i] === 'H'; }
+      function isMine(i){
+        const c = S.board[i];
+        return typeof c === 'string' && c.indexOf(':') > 0 && c.startsWith(S.human_color);
+      }
+
+      function render(){
+        infoEl.textContent = '你执 ' + COLOR_CN[S.human_color] + ' | 红余:' + S.scores.R + ' 黑余:' + S.scores.B +
+          (S.removed && S.removed.length ? ' | 已吃:' + S.removed.join(',') : '');
+        document.getElementById('adviseBtn').disabled = !(myTurn() && !busy);
+        if(S.over){
+          if(S.winner === 'DRAW') statusEl.textContent = '和棋(连续30步无吃子)';
+          else if(S.winner === S.human_color) statusEl.textContent = '🎉 你赢了!点「新对局」再来一局';
+          else if(S.winner === null) statusEl.textContent = '对局结束(无胜负)';
+          else statusEl.textContent = 'AI(' + COLOR_CN[S.winner] + ')获胜,点「新对局」再战';
+        } else {
+          statusEl.textContent = (S.turn === S.human_color) ? '轮到你走子' : 'AI 思考中…';
+        }
+
+        // 转置(纵向)渲染:4行8列 → 4列8行,新第i格对应原 (i%4)行 *8 + floor(i/4)列
+        const vertical = document.getElementById('vertical').checked;
+        const order = [];
+        for(let i=0;i<32;i++){
+          order.push(vertical ? ((i%4)*8 + Math.floor(i/4)) : i);
+        }
+        boardEl.style.gridTemplateColumns = 'repeat(' + (vertical?4:8) + ',56px)';
+        boardEl.innerHTML = '';
+
+        const clickable = myTurn() && !busy;
+        for(let i=0;i<32;i++){
+          const orig = order[i];
+          const d = document.createElement('div');
+          d.className = 'cell';
+          const c = S.board[orig];
+          let content = '';
+          if(c === '.'){
+            d.classList.add('empty');
+            if(clickable && selected >= 0){
+              const lm = legalMoves.find(m => m.dst === orig);
+              if(lm){
+                d.classList.add(lm.type === 'cannon' ? 'attack' : 'target');
+                d.addEventListener('click', ()=>doMove(lm, orig));
+              }
+            }
+          } else if(c === 'H'){
+            d.classList.add('hidden');
+            content = '■';
+            if(clickable){
+              const lm = selected >= 0 ? legalMoves.find(m => m.dst === orig) : null;
+              if(lm){
+                d.classList.add(lm.type === 'cannon' ? 'attack' : 'target');
+                d.addEventListener('click', ()=>doMove(lm, orig));
+              } else {
+                d.classList.add('clickable');
+                d.addEventListener('click', ()=>doFlip(orig));
+              }
+            }
+          } else {
+            const parts = c.split(':');
+            d.classList.add(parts[0]);
+            content = PIECE_CN[parts[0]+parts[1]] || (parts[0]+parts[1]);
+            if(clickable){
+              if(isMine(orig)){
+                d.classList.add('mine');
+                d.addEventListener('click', ()=>selectPiece(orig));
+              } else if(selected >= 0){
+                const lm = legalMoves.find(m => m.dst === orig);
+                if(lm){
+                  d.classList.add(lm.type === 'cannon' ? 'attack' : 'target');
+                  d.addEventListener('click', ()=>doMove(lm, orig));
+                }
+              }
+            }
+          }
+          d.innerHTML = '<span class="coord">' + Math.floor(orig/8) + ',' + (orig%8) + '</span>' + content;
+          boardEl.appendChild(d);
+        }
+
+        logEl.textContent = S.history.map((h,i) => {
+          let t = (i+1) + '. ' + h.text;
+          if(h.revealed){
+            const k = h.revealed.replace(':','');
+            const cn = (h.revealed[0]==='R'?'红':'黑') + (PIECE_CN[k] || k);
+            t += (h.action && h.action[0] === 'flip') ? (' → ' + cn) : (' 翻出' + cn);
+          }
+          if(h.reason && h.reason !== 'move' && h.reason !== 'flip') t += ' [' + h.reason + ']';
+          return t;
+        }).join('\n');
+        renderAdvice();
+      }
+
+      async function askAdvice(){
+        if(!myTurn() || busy) return;
+        busy = true;
+        const r = await api('/api/advise', {});
+        busy = false;
+        if(r.error){ alert(r.error); advice = null; }
+        else { advice = r.moves; }
+        render();
+      }
+
+      function renderAdvice(){
+        const el = document.getElementById('pAdvice');
+        if(!advice || !advice.length){ el.innerHTML = ''; return; }
+        el.innerHTML = '<div style="font-weight:600;margin-bottom:4px">💡 建议(胜率由模拟对局统计,点击可直接走):</div>' +
+          advice.map((m,i)=>{
+            return '<div class="adv-item' + (i===0?' adv-top':'') + '" data-i="' + i + '">' +
+              (i+1) + '. ' + m.text + ' — 胜率 ' + (m.win_rate*100).toFixed(1) + '% (' + m.visits + '次模拟)</div>';
+          }).join('');
+        el.querySelectorAll('.adv-item').forEach(d=>{
+          d.onclick = ()=>{
+            const m = advice[parseInt(d.dataset.i, 10)];
+            if(m && myTurn() && !busy) execAction(m.action);
+          };
+        });
+      }
+
+      async function execAction(action){
+        busy = true;
+        const r = await api('/api/move', {action: action});
+        if(r.error){ alert(r.error); }
+        else { S = r; }
+        selected = -1; legalMoves = []; advice = null;
+        busy = false;
+        render();
+      }
+
+      async function doFlip(idx){
+        busy = true;
+        const r = await api('/api/move', {action:['flip', idx]});
+        if(r.error){ alert(r.error); }
+        else { S = r; selected = -1; legalMoves = []; }
+        advice = null;
+        busy = false;
+        render();
+      }
+
+      async function selectPiece(src){
+        if(selected === src){ selected = -1; legalMoves = []; render(); return; }
+        busy = true;
+        const r = await api('/api/legal', {src: src});
+        if(r.error){ alert(r.error); selected = -1; }
+        else { selected = src; legalMoves = r.moves || []; }
+        busy = false;
+        render();
+      }
+
+      async function doMove(lm, dst){
+        busy = true;
+        const r = await api('/api/move', {action:[lm.type, selected, dst]});
+        if(r.error){ alert(r.error); }
+        else { S = r; }
+        selected = -1; legalMoves = []; advice = null;
+        busy = false;
+        render();
+      }
+
+      function loadState(r){
+        S = r;
+        selected = -1; legalMoves = []; advice = null;
+        render();
+      }
+      _playLoad = loadState;
+      _playRefresh = async () => {
+        if(busy) return;
+        const r = await api('/api/state', {});
+        if(!r.error) loadState(r);
+      };
+
+      document.getElementById('newGame').onclick = newGame;
+      document.getElementById('agentSel').onchange = newGame;
+      document.getElementById('vertical').onchange = render;
+      document.getElementById('adviseBtn').onclick = askAdvice;
+      document.getElementById('toCoachBtn').onclick = () => switchTab('coach');
+      newGame();
+    })();
+
+    // ================= 指导逻辑 =================
+    (function(){
+      const boardEl = document.getElementById('cBoard');
+      const infoEl = document.getElementById('cInfo');
+      const statusEl = document.getElementById('cStatus');
+      const editorEl = document.getElementById('cEditor');
+      const resultEl = document.getElementById('cResult');
+
+      // 格子状态: '.' 空 | 'R:J' 明棋 | 'R:J?' 暗棋(内容指定) | 'H' 暗棋(内容未知)
+      let cells = [];
+      let turn = 'R';
+      let selected = -1;
+      let analysis = null;   // {eval_win_rate, total, moves, hidden_map, remaining_pool}
+      let history = [];      // 推演栈 [{cells, turn, scores}]
+      let badCell = -1;      // 分析报错时高亮的冲突格子
+      let hiddenMap = null;  // AI 分析的暗棋分配 {idx: 'R:P'}(仅用于推演,不展示)
+      let busy = false;
+      let source = '手动编辑';  // 局面来源:对局快照 / 手动编辑
+
+      const TYPE_OPTS = [['.', '空'], ['H', '暗棋·内容未知'],
+        ['R:J','红帅'],['R:S','红仕'],['R:X','红相'],['R:R','红车'],['R:N','红马'],['R:C','红炮'],['R:P','红兵'],
+        ['B:J','黑将'],['B:S','黑士'],['B:X','黑象'],['B:R','黑车'],['B:N','黑马'],['B:C','黑炮'],['B:P','黑卒']];
+
+      function randSetup(){
+        // 公开信息随机局:32 子标准配置随机摆放,4 个翻开为明棋,其余暗棋内容未知(H)
+        const pieces = [];
+        for(const c of ['R','B']){
+          for(const t of ['J','S','S','X','X','R','R','N','N','C','C','P','P','P','P','P']){
+            pieces.push(c + ':' + t);
+          }
+        }
+        for(let i = pieces.length - 1; i > 0; i--){
+          const j = Math.floor(Math.random() * (i + 1));
+          [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
+        }
+        const cells2 = Array(32).fill('H');
+        const idxs = [...Array(32).keys()].sort(() => Math.random() - 0.5).slice(0, 4);
+        idxs.forEach(i => { cells2[i] = pieces[i]; });
+        return cells2;
+      }
+
+      function scores(){
+        return {R: parseInt(document.getElementById('scoreR').value, 10) || 0,
+                B: parseInt(document.getElementById('scoreB').value, 10) || 0};
+      }
+      function updateScores(sc){
+        document.getElementById('scoreR').value = sc.R;
+        document.getElementById('scoreB').value = sc.B;
+      }
+      function removedList(){
+        return document.getElementById('removed').value.split(/[,，\s]+/).map(s=>s.trim()).filter(Boolean);
+      }
+
+      function render(){
+        infoEl.textContent = source + ' | 轮到 ' + COLOR_CN[turn] + ' | 红余:' + scores().R + ' 黑余:' + scores().B;
+        boardEl.innerHTML = '';
+        for(let i=0;i<32;i++){
+          const orig = (i%4)*8 + Math.floor(i/4);   // 纵向转置渲染
+          const d = document.createElement('div');
+          d.className = 'cell';
+          const c = cells[orig];
+          let content = '';
+          if(c === '.' || c === undefined){
+            d.classList.add('empty');
+          } else if(c === 'H' || c.endsWith('?')){
+            // 暗棋:内容对所有人未知,一律显示 ■(兼容导入文本中的 R:J?)
+            d.classList.add('hidden');
+            content = '■';
+          } else {
+            const parts = c.split(':');
+            d.classList.add(parts[0]);
+            content = PIECE_CN[parts[0]+parts[1]] || c;
+          }
+          d.innerHTML = '<span class="coord">' + Math.floor(orig/8) + ',' + (orig%8) + '</span>' + content;
+          if(orig === selected) d.classList.add('sel');
+          if(orig === badCell) d.classList.add('badcell');
+          d.addEventListener('click', () => selectCell(orig));
+          boardEl.appendChild(d);
+        }
+        renderEditor();
+        renderResult();
+      }
+
+      function selectCell(i){
+        if(busy) return;
+        selected = (selected === i) ? -1 : i;
+        badCell = -1;
+        render();
+      }
+
+      function markEdited(){
+        if(source !== '手动编辑'){
+          source = '手动编辑(切走将还原为对局快照)';
+          render();
+        }
+      }
+
+      function renderEditor(){
+        if(selected < 0){ editorEl.innerHTML = '<b>格子编辑</b><br><span class="hint">点击棋盘上的格子后在此编辑</span>'; return; }
+        const cur = cells[selected] || '.';
+        const h = ['<b>格子编辑</b> — 第 ' + (selected+1) + ' 格(' + (Math.floor(selected/8)+1) + '行 ' + (selected%8+1) + '列)',
+          '<div style="margin:6px 0"><select id="typeSel">' + TYPE_OPTS.map(o =>
+            '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') +
+            '</select></div>',
+          '<button id="applyBtn">应用</button>',
+          '<span class="hint">暗棋=内容未知(所有人不可见);AI 分析时从剩余棋子随机分配</span>'
+        ].join('');
+        editorEl.innerHTML = h;
+        document.getElementById('applyBtn').onclick = applyCell;
+      }
+
+      function applyCell(){
+        cells[selected] = document.getElementById('typeSel').value;
+        analysis = null;
+        hiddenMap = null;
+        markEdited();
+        render();
+      }
+
+      // —— 已吃登记(可视化面板) ——
+      function parseRemoved(text){
+        const counts = {R:{}, B:{}};
+        for(const c of ['R','B']){ for(const t of TYPE_ORDER) counts[c][t] = 0; }
+        text.split(/[,，\s]+/).map(s=>s.trim()).filter(Boolean).forEach(s => {
+          if(s.length >= 3 && s[1] === ':' && counts[s[0]] && counts[s[0]][s[2]] !== undefined) counts[s[0]][s[2]]++;
+        });
+        return counts;
+      }
+      function onBoardCount(color, t){
+        return cells.filter(c => c === color + ':' + t).length;
+      }
+      function updateRmPreview(counts){
+        const list = [];
+        for(const c of ['R','B']){ for(const t of TYPE_ORDER){ for(let i=0;i<counts[c][t];i++) list.push(c+':'+t); } }
+        document.getElementById('rmPreview').textContent = '已吃登记:' + (list.join(',') || '(无)');
+      }
+      function openRemovedModal(){
+        const counts = parseRemoved(document.getElementById('removed').value);
+        const body = document.getElementById('rmBody');
+        body.innerHTML = ['R','B'].map(color => {
+          const rows = TYPE_ORDER.map(t => {
+            const on = counts[color][t];
+            const max = PIECE_COUNT[t] - onBoardCount(color, t);
+            const over = on > max;
+            return '<div style="display:flex;align-items:center;gap:6px;margin:2px 0">' +
+              '<span style="width:60px">' + PIECE_CN[color+t] + '</span>' +
+              '<button data-c="' + color + '" data-t="' + t + '" data-d="-1">−</button>' +
+              '<span id="n_' + color + t + '" style="width:16px;text-align:center;' + (over ? 'color:#f00' : '') + '">' + on + '</span>' +
+              '<button data-c="' + color + '" data-t="' + t + '" data-d="1">+</button>' +
+              '<span class="hint" style="font-size:11px">盘上' + onBoardCount(color, t) + '/上限' + max + '</span></div>';
+          }).join('');
+          return '<div><b>' + COLOR_CN[color] + '</b>' + rows + '</div>';
+        }).join('');
+        body.onclick = (e) => {
+          const b = e.target.closest('button[data-c]');
+          if(!b) return;
+          const c = b.dataset.c, t = b.dataset.t, d = parseInt(b.dataset.d, 10);
+          const max = PIECE_COUNT[t] - onBoardCount(c, t);
+          counts[c][t] = Math.max(0, Math.min(max, counts[c][t] + d));
+          const nEl = document.getElementById('n_' + c + t);
+          nEl.textContent = counts[c][t];
+          nEl.style.color = '';
+          updateRmPreview(counts);
+        };
+        window._rmCounts = counts;
+        updateRmPreview(counts);
+        document.getElementById('rmModal').style.display = 'flex';
+      }
+      function closeRmModal(){
+        document.getElementById('rmModal').style.display = 'none';
+      }
+
+      async function analyze(){
+        if(busy) return;
+        busy = true;
+        statusEl.textContent = 'AI 分析中…(约 2~3 秒)';
+        document.getElementById('analyzeBtn').disabled = true;
+        const seed = document.getElementById('seed').value.trim() || null;
+        const r = await api('/api/coach/analyze', {
+          board: cells, turn: turn, scores: scores(), seed: seed, time_budget: 2.5,
+          removed: removedList().length ? removedList() : null
+        });
+        busy = false;
+        document.getElementById('analyzeBtn').disabled = false;
+        if(r.error){
+          alert(r.error);
+          analysis = null;
+          statusEl.textContent = '分析失败:' + r.error;
+          const cm = r.error.match(/cell (\d+)/);
+          badCell = cm ? parseInt(cm[1], 10) : -1;
+          render();
+          return;
+        }
+        analysis = r;
+        badCell = -1;
+        hiddenMap = r.hidden_map || null;
+        statusEl.textContent = '分析完成(' + r.total + ' 次模拟)';
+        render();
+      }
+
+      function renderResult(){
+        const histHtml = history.length
+          ? '<div style="margin-top:8px"><button id="undoBtn">↩ 撤销推演(已推演 ' + history.length + ' 步)</button></div>'
+          : '';
+        let html;
+        if(!analysis){
+          html = '<b>AI 分析</b><div class="hint">编辑好局面后点「🎯 AI 分析」,AI 会给出下一步建议与胜率</div>' + histHtml;
+        } else {
+          const a = analysis;
+          const hasHidden = cells.indexOf('H') >= 0;
+          const evalLine = a.eval_win_rate == null
+            ? '<div><b>该局面已终局,无合法动作</b></div>'
+            : '<div>当前局面:' + COLOR_CN[a.turn] + '胜率 <b>' + (a.eval_win_rate*100).toFixed(1) + '%</b> (总模拟 ' + a.total + ' 次)</div>';
+          const list = a.moves.length ? a.moves.map((m,i) =>
+            '<div class="adv-item' + (i===0?' adv-top':'') + '" data-i="' + i + '">' +
+            (i===0?'⭐ 推荐 ':'') + (i+1) + '. ' + m.text + ' — 胜率 ' + (m.win_rate*100).toFixed(1) +
+            '% (' + m.visits + '次模拟)</div>').join('') : '<div class="hint">无候选动作</div>';
+          let poolHtml = '';
+          if(a.remaining_pool && Object.keys(a.remaining_pool).length){
+            const parts = ['R','B'].map(c => TYPE_ORDER.filter(t => a.remaining_pool[c+t] > 0)
+              .map(t => PIECE_CN[c+t] + '×' + a.remaining_pool[c+t]).join(' '));
+            poolHtml = '<div class="hint">🧩 暗棋池(历史推论):红:' + (parts[0] || '无') + ' | 黑:' + (parts[1] || '无') + '</div>';
+          }
+          html = '<b>AI 分析</b>' + evalLine + list + histHtml + poolHtml +
+            (hasHidden ? '<div class="hint">⚠ 含暗棋(H):AI 从「标准配置 − 明棋 − 已吃」的剩余棋子中随机分配,推演按该假设进行;固定「种子」可复现</div>' : '') +
+            '<div class="hint">点击动作可推演一步(可连续分析多步),支持撤销</div>';
+        }
+        resultEl.innerHTML = html;
+        resultEl.querySelectorAll('.adv-item').forEach(d => {
+          d.onclick = () => {
+            const m = analysis.moves[parseInt(d.dataset.i, 10)];
+            if(m && !busy) applyAction(m.action, m.text);
+          };
+        });
+        const ub = document.getElementById('undoBtn');
+        if(ub) ub.onclick = undoStep;
+      }
+
+      // —— 本地推演(与引擎规则一致:吃子扣分/炮击移炮/翻棋) ——
+      // 暗棋(H)内容按 AI 分析的分配(hidden_map)推演,仅作为假设预览
+      function applyAction(action, text){
+        const src = action[1], dst = action[2];
+        const t0 = action[0];
+        const snap = {cells: cells.slice(), turn: turn, scores: scores()};
+        if(t0 === 'flip'){
+          const c = cells[src];
+          if(c === 'H'){
+            if(hiddenMap && hiddenMap[src]){ cells[src] = hiddenMap[src]; }
+            else { alert('该暗棋内容未知,无法推演(请先「AI 分析」,AI 会按剩余棋子随机分配暗棋内容)'); return; }
+          } else {
+            cells[src] = c.slice(0, 3);
+          }
+        } else {
+          const mover = cells[src];
+          if(mover === undefined){ alert('异常:源格为空'); return; }
+          let tgt = cells[dst];
+          if(tgt === 'H'){
+            if(!hiddenMap || !hiddenMap[dst]){ alert('目标暗棋内容未知,无法推演(请先「AI 分析」)'); return; }
+            tgt = hiddenMap[dst];
+          }
+          if(tgt !== undefined && tgt !== '.'){
+            const tv = VALUE[tgt[2]];
+            const tm = tgt[0];
+            if(t0 === 'cannon' && tm === mover[0] && !tgt.endsWith('?')){
+              alert('目标为己方明棋,非合法动作'); return;
+            }
+            if(t0 === 'move' && tm === mover[0]){
+              alert('目标为己方棋子,非合法动作'); return;
+            }
+            const sc = scores();
+            if(tm === mover[0]){
+              sc[mover[0]] -= tv;
+            } else {
+              sc[tm] -= tv;
+            }
+            updateScores(sc);
+          }
+          cells[dst] = mover;
+          cells[src] = '.';
+        }
+        history.push(snap);
+        turn = (turn === 'R') ? 'B' : 'R';
+        analysis = null;
+        selected = -1;
+        markEdited();
+        render();
+      }
+
+      function undoStep(){
+        if(!history.length) return;
+        const s = history.pop();
+        cells = s.cells;
+        turn = s.turn;
+        updateScores(s.scores);
+        analysis = null;
+        selected = -1;
+        render();
+      }
+
+      // —— 导入/导出/填满暗棋 ——
+      function fillHidden(){
+        cells = Array(32).fill('H');
+        history = []; analysis = null; selected = -1; hiddenMap = null;
+        markEdited();
+        render();
+      }
+
+      function exportText(){
+        const removed = removedList();
+        const lines = ['# Fanqi 局面 | 轮到:' + COLOR_CN[turn] + ' | 红余:' + scores().R + ' 黑余:' + scores().B +
+          (removed.length ? ' | 已吃:' + removed.join(',') : '')];
+        for(let i=0;i<32;i++){
+          const c = cells[i];
+          if(c === undefined || c === '.') continue;
+          const r = Math.floor(i/8), col = i%8;
+          lines.push((c === 'H' || c.endsWith('?')) ? ('H@' + r + ',' + col) : (c + '@' + r + ',' + col));
+        }
+        return lines.join('\n');
+      }
+
+      function parseImport(txt){
+        const next = Array(32).fill('.');
+        const seen = new Set();
+        for(const raw of txt.split(/\r?\n/)){
+          const line = raw.trim();
+          if(!line || line.startsWith('#')) continue;
+          const m = line.match(/^(H|R:[A-Z]\??|B:[A-Z]\??)@(\d+),(\d+)$/);
+          if(!m) throw new Error('无法解析: ' + line);
+          const r = parseInt(m[2],10), c = parseInt(m[3],10);
+          if(r < 0 || r > 3 || c < 0 || c > 7) throw new Error('坐标越界: ' + line);
+          const idx = r*8 + c;
+          if(seen.has(idx)) throw new Error('重复格子: ' + line);
+          seen.add(idx);
+          next[idx] = m[1];
+        }
+        return next;
+      }
+
+      function openImport(){
+        document.getElementById('modal').style.display = 'flex';
+        document.getElementById('importText').value = exportText().split('\n').slice(1).join('\n');
+      }
+      function closeImport(){
+        document.getElementById('modal').style.display = 'none';
+      }
+      function doImport(){
+        const txt = document.getElementById('importText').value;
+        try{
+          cells = parseImport(txt);
+          for(const line of txt.split(/\r?\n/)){
+            const t = line.match(/轮到:(红方|黑方)/);
+            if(t){ turn = (t[1] === '红方') ? 'R' : 'B'; document.getElementById('turnSel').value = turn; }
+            const s = line.match(/红余:(\d+)\s+黑余:(\d+)/);
+            if(s) updateScores({R: parseInt(s[1],10), B: parseInt(s[2],10)});
+            const rm = line.match(/已吃:([^|]+)/);
+            if(rm) document.getElementById('removed').value = rm[1].trim();
+          }
+          history = []; analysis = null; selected = -1; hiddenMap = null;
+          closeImport();
+          markEdited();
+          render();
+        }catch(e){
+          alert('导入失败:' + e.message);
+        }
+      }
+
+      // —— 与对战模式桥接 ——
+      function coachLoad(r){
+        cells = r.board;
+        turn = r.turn;
+        document.getElementById('turnSel').value = turn;
+        updateScores(r.scores);
+        document.getElementById('removed').value = (r.removed || []).join(',');
+        history = []; analysis = null; selected = -1; hiddenMap = null; badCell = -1;
+        source = '对局快照(执' + COLOR_CN[r.human_color] + ',AI ' + (r.agent_name || '') + ')';
+        render();
+      }
+
+      async function startGameFromCoach(){
+        const body = {
+          board: cells, turn: turn, scores: scores(),
+          removed: removedList().length ? removedList() : null,
+          seed: document.getElementById('seed').value.trim() || null,
+          agent: 'mcts',
+          human_color: document.getElementById('fhSel').value
+        };
+        const r = await api('/api/play/from_setup', body);
+        if(r.error){ alert(r.error); return; }
+        if(_playLoad) _playLoad(r);
+        switchTab('play');
+      }
+
+      document.getElementById('fillBtn').onclick = fillHidden;
+      document.getElementById('importBtn').onclick = openImport;
+      document.getElementById('exportBtn').onclick = () => {
+        const txt = exportText();
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(txt).then(() => alert('已复制到剪贴板')).catch(() => alert('复制失败,请手动复制:\n\n' + txt));
+        } else {
+          alert('请手动复制:\n\n' + txt);
+        }
+      };
+      document.getElementById('importOk').onclick = doImport;
+      document.getElementById('importCancel').onclick = closeImport;
+      document.getElementById('randomBtn').onclick = () => {
+        cells = randSetup(); turn = 'R'; history = []; analysis = null; selected = -1; hiddenMap = null;
+        updateScores({R:60, B:60});
+        document.getElementById('seed').value = '';
+        markEdited();
+        render();
+      };
+      document.getElementById('clearBtn').onclick = () => {
+        cells = Array(32).fill('.'); history = []; analysis = null; selected = -1; hiddenMap = null;
+        markEdited();
+        render();
+      };
+      document.getElementById('turnSel').onchange = () => {
+        turn = document.getElementById('turnSel').value; analysis = null;
+        markEdited();
+        render();
+      };
+      document.getElementById('removedBtn').onclick = openRemovedModal;
+      document.getElementById('removed').onchange = markEdited;
+      document.getElementById('rmOk').onclick = () => {
+        const counts = window._rmCounts;
+        const list = [];
+        for(const c of ['R','B']){ for(const t of TYPE_ORDER){ for(let i=0;i<counts[c][t];i++) list.push(c+':'+t); } }
+        document.getElementById('removed').value = list.join(',');
+        closeRmModal();
+        markEdited();
+      };
+      document.getElementById('rmClear').onclick = () => {
+        const counts = window._rmCounts;
+        for(const c of ['R','B']){ for(const t of TYPE_ORDER){ counts[c][t] = 0; } }
+        for(const c of ['R','B']){ for(const t of TYPE_ORDER){
+          document.getElementById('n_' + c + t).textContent = '0';
+        } }
+        updateRmPreview(counts);
+      };
+      document.getElementById('rmCancel').onclick = closeRmModal;
+      document.getElementById('analyzeBtn').onclick = analyze;
+      document.getElementById('startGameBtn').onclick = startGameFromCoach;
+      document.getElementById('backPlayBtn').onclick = async () => {
+        if(_coachRefresh) await _coachRefresh();
+        switchTab('play');
+      };
+
+      _coachRefresh = async () => {
+        const r = await api('/api/play/snapshot', {});
+        if(!r.error) coachLoad(r);
+      };
+
+      cells = randSetup();
+      render();
+    })();
+
+    // ===== 全局 tab 绑定 =====
+    document.getElementById('tabPlay').onclick = () => switchTab('play');
+    document.getElementById('tabCoach').onclick = () => switchTab('coach');
+  </script>
+</body>
+</html>

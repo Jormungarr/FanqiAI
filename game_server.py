@@ -84,14 +84,41 @@ class Session:
         # 定制规则:红方先走
         self.turn = 'R'
         self.history = []
+        self.removed = []
         self.over = False
         self.winner = None
         self.end_reason = None
         if self.turn == self.ai_color:
             self._ai_step()
 
+    @classmethod
+    def from_setup(cls, desc, scores=None, seed=None, removed=None,
+                   agent='mcts', human_color='R', turn='R'):
+        """从任意局面(指导模式)开新对局:已吃历史带入,暗棋池推断保持正确"""
+        s = cls.__new__(cls)
+        s.seed = seed
+        s.agent_name = agent
+        s.game = GameState.from_setup(desc, scores=scores, seed=seed, removed=removed)
+        s.human_color = human_color
+        s.ai_color = 'B' if human_color == 'R' else 'R'
+        if agent == 'mcts':
+            s.agent = MCTSAgent(s.ai_color, time_budget=1.5)
+        elif agent == 'random':
+            s.agent = RandomAgent(s.ai_color, seed=seed)
+        else:
+            s.agent = PreferHighValueAgent(s.ai_color, seed=seed)
+        s.turn = turn
+        s.history = []
+        s.removed = list(removed or [])
+        s.over = False
+        s.winner = None
+        s.end_reason = None
+        if s.turn == s.ai_color:
+            s._ai_step()
+        return s
+
     def _apply_step(self, color, action):
-        """执行一步并记录;翻棋/炮盲狙时记录被翻开的棋子,供前端展示「翻开得到什么」"""
+        """执行一步并记录;翻棋/炮盲狙记录被翻开棋子;吃子/炮击记录被吃棋子(历史)"""
         tgt = None
         was_hidden = False
         if action[0] in ('flip', 'cannon'):
@@ -99,10 +126,15 @@ class Session:
             tgt = self.game.board[idx]
             # 必须在执行前判断:执行后棋子已被翻开
             was_hidden = tgt is not None and not tgt.revealed
+        elif action[0] == 'capture':
+            tgt = self.game.board[action[2]]
         ok, reason = self.game.apply_action(action)
         entry = {'player': color, 'action': action, 'reason': reason}
         if was_hidden:
             entry['revealed'] = f"{tgt.color}:{tgt.ptype}"
+        if reason in ('capture', 'cannon') and action[0] in ('capture', 'cannon'):
+            # 被吃子(公开信息)加入已吃历史,供指导模式自动载入
+            self.removed.append(f"{tgt.color}:{tgt.ptype}")
         self.history.append(entry)
         return ok, reason
 
@@ -126,15 +158,18 @@ class Session:
             return False, 'game over'
         if self.turn != self.human_color:
             return False, 'not your turn'
-        # apply_action 返回 (ok, reason):ok=True 表示游戏结束,reason 以 'invalid' 开头表示非法走法
+        # apply_action 返回 (ok, reason):ok=True 表示游戏结束;
+        # 合法的「继续」reason 只有动作类型名(move/flip/capture/cannon),其余均为非法走法
         ok, reason = self._apply_step(self.human_color, action)
         if ok:
             self.over = True
             self.winner = self.game.winner()
             self.end_reason = reason
             return True, None
-        if reason.startswith('invalid'):
+        if reason not in ('move', 'flip', 'capture', 'cannon'):
             self.history.pop()
+            if self.removed:
+                self.removed.pop()
             return False, reason
         self.turn = self.ai_color
         self._ai_step()
@@ -166,6 +201,7 @@ class Session:
                 for h in self.history
             ],
             'last': last,
+            'removed': list(self.removed),
         }
 
 
@@ -200,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ('/', '/web_ui/'):
             self.send_response(302)
-            self.send_header('Location', '/web_ui/play.html')
+            self.send_header('Location', '/web_ui/game.html')
             self.end_headers()
             return
         # 静态文件(仅限项目目录内,防路径穿越)
@@ -226,10 +262,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        global session
         path = urlparse(self.path).path
         body = self._read_body()
+        if path == '/api/state':
+            self._send_json(session.state_json())
+            return
         if path == '/api/new':
-            global session
             session = Session(seed=body.get('seed'), agent=body.get('agent', 'prefer'))
             self._send_json(session.state_json())
         elif path == '/api/legal':
@@ -248,6 +287,53 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({'error': err or 'invalid move'}, 400)
                 return
             self._send_json(session.state_json(last=action_text(action, session.human_color)))
+        elif path == '/api/play/snapshot':
+            # 当前对局的公开快照:供指导模式一键载入(自动带已吃历史)
+            desc = []
+            for p in session.game.board:
+                if p is None:
+                    desc.append('.')
+                elif not p.revealed:
+                    desc.append('H')
+                else:
+                    desc.append(f'{p.color}:{p.ptype}')
+            self._send_json({'ok': True, 'board': desc, 'turn': session.turn,
+                             'scores': dict(session.game.scores),
+                             'removed': list(session.removed),
+                             'human_color': session.human_color,
+                             'agent_name': session.agent_name,
+                             'over': session.over})
+        elif path == '/api/play/from_setup':
+            # 从任意局面(指导模式)开新对局:已吃历史带入,暗棋池推断保持正确
+            board = body.get('board')
+            if not isinstance(board, list) or len(board) != 32:
+                self._send_json({'error': 'board must be 32 cells'}, 400)
+                return
+            turn = body.get('turn', 'R')
+            if turn not in ('R', 'B'):
+                self._send_json({'error': 'bad turn'}, 400)
+                return
+            human_color = body.get('human_color', 'R')
+            if human_color not in ('R', 'B'):
+                self._send_json({'error': 'bad human_color'}, 400)
+                return
+            agent = body.get('agent', 'mcts')
+            if agent not in ('mcts', 'random', 'prefer'):
+                self._send_json({'error': 'bad agent'}, 400)
+                return
+            removed = body.get('removed')
+            if removed is not None and not isinstance(removed, list):
+                self._send_json({'error': 'removed must be a list'}, 400)
+                return
+            try:
+                session = Session.from_setup(board, scores=body.get('scores'),
+                                             seed=body.get('seed'), removed=removed,
+                                             agent=agent, human_color=human_color,
+                                             turn=turn)
+            except ValueError as e:
+                self._send_json({'error': str(e)}, 400)
+                return
+            self._send_json(session.state_json())
         elif path == '/api/advise':
             # 决策建议:对当前玩家局面做 MCTS 搜索,输出每个动作的模拟胜率
             if session.over:
@@ -344,7 +430,7 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f'Fanqi 人机对战服务器已启动: http://{args.host}:{args.port}/web_ui/play.html')
+    print(f'Fanqi 对战·指导服务器已启动: http://{args.host}:{args.port}/web_ui/game.html')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
