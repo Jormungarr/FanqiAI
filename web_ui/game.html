@@ -683,6 +683,8 @@
           const mover = cells[src];
           if(mover === undefined){ alert('异常:源格为空'); return; }
           let tgt = cells[dst];
+          // 目标原是否为暗棋(H 或 R:J?):炮击暗棋允许误伤己方(自罚),仅拒绝己方明棋
+          const tgtWasHidden = (tgt === 'H') || (typeof tgt === 'string' && tgt.endsWith('?'));
           if(t0 === 'cannon' && (tgt === '.' || tgt === undefined)){
             alert('炮不能空打:必须隔一个子作为炮架并命中棋靶'); return;
           }
@@ -693,7 +695,7 @@
           if(tgt !== undefined && tgt !== '.'){
             const tv = VALUE[tgt[2]];
             const tm = tgt[0];
-            if(t0 === 'cannon' && tm === mover[0] && !tgt.endsWith('?')){
+            if(t0 === 'cannon' && tm === mover[0] && !tgtWasHidden){
               alert('目标为己方明棋,非合法动作'); return;
             }
             if(t0 === 'move' && tm === mover[0]){

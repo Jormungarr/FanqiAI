@@ -340,6 +340,8 @@
         const mover = cells[src];
         if(mover === undefined){ alert('异常:源格为空'); return; }
         let tgt = cells[dst];
+        // 目标原是否为暗棋(H 或 R:J?):炮击暗棋允许误伤己方(自罚),仅拒绝己方明棋
+        const tgtWasHidden = (tgt === 'H') || (typeof tgt === 'string' && tgt.endsWith('?'));
         if(tgt === 'H'){
           // 目标暗棋:按 AI 假设的内容结算
           if(!hiddenMap || !hiddenMap[dst]){ alert('目标暗棋内容未知,无法推演(请先「AI 分析」)'); return; }
@@ -349,7 +351,7 @@
           // 吃子/炮击结算:吃对方扣对方分;炮击误伤己方暗棋扣自己分
           const tv = VALUE[tgt[2]];
           const tm = tgt[0];
-          if(t0 === 'cannon' && tm === mover[0] && !tgt.endsWith('?')){
+          if(t0 === 'cannon' && tm === mover[0] && !tgtWasHidden){
             alert('目标为己方明棋,非合法动作'); return;
           }
           if(t0 === 'move' && tm === mover[0]){
